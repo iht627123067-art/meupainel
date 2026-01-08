@@ -1,0 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 4%;
+    --foreground: 45 10% 95%;
+
+    --card: 220 18% 7%;
+    --card-foreground: 45 10% 95%;
+
+    --popover: 220 18% 8%;
+    --popover-foreground: 45 10% 95%;
+
+    --primary: 38 92% 50%;
+    --primary-foreground: 220 20% 4%;
+
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 45 10% 90%;
+
+    --muted: 220 15% 15%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 38 70% 45%;
+    --accent-foreground: 220 20% 4%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 45 10% 95%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 45 10% 95%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 220 20% 4%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 45 10% 95%;
+
+    --border: 220 15% 15%;
+    --input: 220 15% 12%;
+    --ring: 38 92% 50%;
+
+    --radius: 0.75rem;
+
+    /* Custom design tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(38, 92%, 50%) 0%, hsl(28, 90%, 45%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(220, 18%, 8%) 0%, hsl(220, 18%, 6%) 100%);
+    --gradient-glass: linear-gradient(135deg, hsla(220, 18%, 12%, 0.6) 0%, hsla(220, 18%, 8%, 0.4) 100%);
+    
+    --shadow-glow: 0 0 40px hsla(38, 92%, 50%, 0.15);
+    --shadow-card: 0 4px 24px hsla(0, 0%, 0%, 0.4);
+    --shadow-elevated: 0 8px 32px hsla(0, 0%, 0%, 0.6);
+
+    --sidebar-background: 220 18% 5%;
+    --sidebar-foreground: 45 10% 90%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 220 20% 4%;
+    --sidebar-accent: 220 15% 10%;
+    --sidebar-accent-foreground: 45 10% 90%;
+    --sidebar-border: 220 15% 12%;
+    --sidebar-ring: 38 92% 50%;
+  }
+
+  .dark {
+    --background: 220 20% 4%;
+    --foreground: 45 10% 95%;
+    --card: 220 18% 7%;
+    --card-foreground: 45 10% 95%;
+    --popover: 220 18% 8%;
+    --popover-foreground: 45 10% 95%;
+    --primary: 38 92% 50%;
+    --primary-foreground: 220 20% 4%;
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 45 10% 90%;
+    --muted: 220 15% 15%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 38 70% 45%;
+    --accent-foreground: 220 20% 4%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 45 10% 95%;
+    --border: 220 15% 15%;
+    --input: 220 15% 12%;
+    --ring: 38 92% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter', system-ui, sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50 rounded-xl;
+    background: var(--gradient-glass);
+  }
+
+  .glow-effect {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-primary);
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-pending {
+    @apply bg-warning/20 text-warning;
+  }
+
+  .status-approved {
+    @apply bg-success/20 text-success;
+  }
+
+  .status-rejected {
+    @apply bg-destructive/20 text-destructive;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out forwards;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { 
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to { 
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes scaleIn {
+    from { 
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to { 
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
