@@ -227,10 +227,10 @@ export default function Content() {
                 </div>
 
                 {/* Main Content - Split View */}
-                <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 overflow-hidden">
+                <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 overflow-hidden h-full">
                     {/* Left Panel - List */}
-                    <Card className="lg:col-span-1 flex flex-col">
-                        <CardHeader className="shrink-0">
+                    <Card className="lg:col-span-1 flex flex-col h-full overflow-hidden">
+                        <CardHeader className="shrink-0 p-4">
                             <CardTitle className="text-lg">Artigos</CardTitle>
                         </CardHeader>
                         <Separator />
@@ -253,7 +253,7 @@ export default function Content() {
                                                 className={cn(
                                                     "w-full text-left p-3 rounded-lg border transition-all hover:border-primary/50",
                                                     isSelected
-                                                        ? "border-primary bg-primary/5"
+                                                        ? "border-primary bg-primary/5 shadow-sm"
                                                         : "border-border bg-background hover:bg-muted/50"
                                                 )}
                                             >
@@ -282,13 +282,13 @@ export default function Content() {
                     </Card>
 
                     {/* Right Panel - Content Viewer */}
-                    <Card className="lg:col-span-2 flex flex-col">
+                    <Card className="lg:col-span-2 flex flex-col h-full overflow-hidden">
                         {selectedContent ? (
                             <>
-                                <CardHeader className="shrink-0">
+                                <CardHeader className="shrink-0 p-6 pb-4">
                                     <div className="flex items-start justify-between gap-4">
                                         <div className="flex-1">
-                                            <CardTitle className="text-xl mb-2">
+                                            <CardTitle className="text-xl mb-2 leading-relaxed">
                                                 {selectedContent.alerts.title}
                                             </CardTitle>
                                             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
@@ -373,10 +373,24 @@ export default function Content() {
                                     </div>
                                 </CardHeader>
                                 <Separator />
-                                <ScrollArea className="flex-1">
-                                    <CardContent className="p-6">
-                                        <div className="prose prose-sm max-w-none dark:prose-invert">
-                                            <ReactMarkdown>
+                                <ScrollArea className="flex-1 w-full h-full">
+                                    <CardContent className="p-6 lg:p-8">
+                                        <div className="prose prose-sm sm:prose-base max-w-none dark:prose-invert prose-img:rounded-lg prose-img:shadow-md prose-headings:text-primary prose-a:text-blue-500">
+                                            <ReactMarkdown
+                                                components={{
+                                                    img: ({ node, ...props }) => (
+                                                        <img
+                                                            {...props}
+                                                            className="rounded-lg shadow-md max-w-full h-auto mx-auto object-cover max-h-[500px]"
+                                                            loading="lazy"
+                                                            onError={(e) => {
+                                                                const target = e.target as HTMLImageElement;
+                                                                target.style.display = 'none';
+                                                            }}
+                                                        />
+                                                    ),
+                                                }}
+                                            >
                                                 {selectedContent.cleaned_content || selectedContent.markdown_content}
                                             </ReactMarkdown>
                                         </div>

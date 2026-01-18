@@ -116,6 +116,8 @@ async function resolveGoogleNewsUrl(url: string): Promise<string> {
             const externalUrl = allUrls.find(u =>
                 !u.includes('google.com') &&
                 !u.includes('gstatic.com') &&
+                !u.includes('googleapis.com') &&
+                !u.includes('googletagmanager.com') &&
                 !u.includes('w3.org') &&
                 !u.includes('schema.org')
             );
