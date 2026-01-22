@@ -17,6 +17,7 @@ const RssPage = lazy(() => import("./pages/Rss"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Content = lazy(() => import("./pages/Content"));
 const ReviewPage = lazy(() => import("./pages/Review"));
+const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const App = () => (
             <Route path="/research" element={<Research />} />
             <Route path="/rss" element={<RssPage />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

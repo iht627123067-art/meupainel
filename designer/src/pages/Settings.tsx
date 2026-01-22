@@ -6,16 +6,33 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Mail, Rss, Plus, Trash2, Loader2 } from "lucide-react";
+import { useGmailOAuth } from "@/hooks/useGmailOAuth";
+import {
+  Mail,
+  Rss,
+  Plus,
+  Trash2,
+  Loader2,
+  RefreshCw,
+  Link2,
+  Link2Off,
+  CheckCircle,
+  Clock,
+  AlertCircle
+} from "lucide-react";
 
 interface EmailAccount {
   id: string;
   email: string;
   label: string;
   is_active: boolean;
+  oauth_connected?: boolean;
+  last_sync_at?: string;
+  sync_enabled?: boolean;
 }
 
 interface RssFeed {
@@ -28,11 +45,14 @@ interface RssFeed {
 export default function Settings() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
+  const { initiateOAuth, disconnectAccount, triggerSync, isConnecting, isSyncing } = useGmailOAuth();
+
   const [emailAccounts, setEmailAccounts] = useState<EmailAccount[]>([]);
   const [rssFeeds, setRssFeeds] = useState<RssFeed[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newEmail, setNewEmail] = useState({ email: "", label: "" });
   const [newRss, setNewRss] = useState({ url: "", title: "" });
+  const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -56,10 +76,11 @@ export default function Settings() {
 
       setEmailAccounts(emailRes.data || []);
       setRssFeeds(rssRes.data || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: "Erro",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -81,10 +102,11 @@ export default function Settings() {
       toast({ title: "Conta de email adicionada!" });
       setNewEmail({ email: "", label: "" });
       fetchSettings();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: "Erro",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -96,10 +118,11 @@ export default function Settings() {
       if (error) throw error;
       toast({ title: "Conta removida" });
       fetchSettings();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: "Erro",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -119,10 +142,11 @@ export default function Settings() {
       toast({ title: "Feed RSS adicionado!" });
       setNewRss({ url: "", title: "" });
       fetchSettings();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: "Erro",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -134,13 +158,49 @@ export default function Settings() {
       if (error) throw error;
       toast({ title: "Feed removido" });
       fetchSettings();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: "Erro",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
+  };
+
+  const handleConnect = async (accountId: string) => {
+    await initiateOAuth(accountId);
+    // Refresh after a delay to check for changes
+    setTimeout(() => fetchSettings(), 3000);
+  };
+
+  const handleDisconnect = async (accountId: string) => {
+    const success = await disconnectAccount(accountId);
+    if (success) {
+      fetchSettings();
+    }
+  };
+
+  const handleManualSync = async (accountId: string) => {
+    setSyncingAccountId(accountId);
+    await triggerSync(accountId);
+    setSyncingAccountId(null);
+    fetchSettings();
+  };
+
+  const formatLastSync = (dateStr?: string) => {
+    if (!dateStr) return "Nunca sincronizado";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return "Agora mesmo";
+    if (diffMins < 60) return `Há ${diffMins} min`;
+    if (diffHours < 24) return `Há ${diffHours}h`;
+    return `Há ${diffDays} dias`;
   };
 
   if (isLoading) {
@@ -183,9 +243,9 @@ export default function Settings() {
           <TabsContent value="instructions" className="space-y-4">
             <Card className="glass-card border-border/50">
               <CardHeader>
-                <CardTitle>Como Importar Alertas do Google</CardTitle>
+                <CardTitle>Como Conectar sua Conta Gmail</CardTitle>
                 <CardDescription>
-                  Siga os passos abaixo para extrair alertas do Gmail
+                  Conecte sua conta Gmail para sincronização automática de Google Alerts
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -195,9 +255,9 @@ export default function Settings() {
                       1
                     </div>
                     <div>
-                      <h4 className="font-semibold">Abra o email do Google Alerts no Gmail</h4>
+                      <h4 className="font-semibold">Adicione uma conta Gmail</h4>
                       <p className="text-sm text-muted-foreground">
-                        Acesse gmail.com e localize o email do Google Alerts que deseja importar.
+                        Na aba "Contas Gmail", adicione o email e um label identificador.
                       </p>
                     </div>
                   </div>
@@ -207,9 +267,9 @@ export default function Settings() {
                       2
                     </div>
                     <div>
-                      <h4 className="font-semibold">Acesse "Mostrar original"</h4>
+                      <h4 className="font-semibold">Conecte via Google OAuth</h4>
                       <p className="text-sm text-muted-foreground">
-                        Clique nos 3 pontos (⋮) no canto superior direito do email → "Mostrar original".
+                        Clique em "Conectar Gmail" e autorize o acesso aos seus emails do Google Alerts.
                       </p>
                     </div>
                   </div>
@@ -219,9 +279,9 @@ export default function Settings() {
                       3
                     </div>
                     <div>
-                      <h4 className="font-semibold">Copie o conteúdo HTML</h4>
+                      <h4 className="font-semibold">Sincronização Automática</h4>
                       <p className="text-sm text-muted-foreground">
-                        Na nova aba, copie todo o conteúdo do email (Ctrl+A, Ctrl+C).
+                        Seus emails serão sincronizados automaticamente 2x ao dia (06:00 e 18:00 UTC).
                       </p>
                     </div>
                   </div>
@@ -231,31 +291,19 @@ export default function Settings() {
                       4
                     </div>
                     <div>
-                      <h4 className="font-semibold">Use o botão "Importar" na página Alertas</h4>
+                      <h4 className="font-semibold">Sincronização Manual</h4>
                       <p className="text-sm text-muted-foreground">
-                        Vá para a página "Alertas", clique em "Importar" e cole o HTML copiado.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                      5
-                    </div>
-                    <div>
-                      <h4 className="font-semibold">Revise e confirme</h4>
-                      <p className="text-sm text-muted-foreground">
-                        O sistema extrairá automaticamente os artigos. Revise o preview e confirme a importação.
+                        Use o botão "Sincronizar" a qualquer momento para forçar uma atualização.
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-muted/50 p-4">
-                  <h4 className="font-semibold mb-2">💡 Dica</h4>
+                <div className="rounded-lg bg-green-500/10 border border-green-500/20 p-4">
+                  <h4 className="font-semibold text-green-600 mb-2">✨ Automação Ativa</h4>
                   <p className="text-sm text-muted-foreground">
-                    A lógica de extração é baseada no formato schema.org/Article usado pelo Google Alerts.
-                    URLs do Google são automaticamente limpas, removendo parâmetros de tracking.
+                    Com a conexão OAuth, não é mais necessário copiar HTML manualmente.
+                    Os artigos do Google Alerts são extraídos automaticamente!
                   </p>
                 </div>
               </CardContent>
@@ -267,7 +315,7 @@ export default function Settings() {
               <CardHeader>
                 <CardTitle>Adicionar Conta Gmail</CardTitle>
                 <CardDescription>
-                  Configure as contas do Gmail para extrair Google Alerts
+                  Configure as contas do Gmail para extrair Google Alerts automaticamente
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -301,26 +349,94 @@ export default function Settings() {
             <div className="space-y-3">
               {emailAccounts.map((account) => (
                 <Card key={account.id} className="glass-card border-border/50">
-                  <CardContent className="flex items-center justify-between p-4">
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 rounded-lg bg-primary/10">
-                        <Mail className="h-5 w-5 text-primary" />
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className={`p-2 rounded-lg ${account.oauth_connected ? 'bg-green-500/10' : 'bg-primary/10'}`}>
+                          <Mail className={`h-5 w-5 ${account.oauth_connected ? 'text-green-500' : 'text-primary'}`} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{account.email}</p>
+                            {account.oauth_connected ? (
+                              <Badge variant="secondary" className="bg-green-500/10 text-green-600 text-xs">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Conectado
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="bg-yellow-500/10 text-yellow-600 text-xs">
+                                <AlertCircle className="h-3 w-3 mr-1" />
+                                Não Conectado
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <span>{account.label}</span>
+                            {account.oauth_connected && (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  {formatLastSync(account.last_sync_at)}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium">{account.email}</p>
-                        <p className="text-sm text-muted-foreground">{account.label}</p>
+
+                      <div className="flex items-center gap-2">
+                        {account.oauth_connected ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleManualSync(account.id)}
+                              disabled={isSyncing || syncingAccountId === account.id}
+                            >
+                              {syncingAccountId === account.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                              <span className="ml-2 hidden sm:inline">Sincronizar</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDisconnect(account.id)}
+                              className="text-yellow-600 hover:text-yellow-700"
+                            >
+                              <Link2Off className="h-4 w-4" />
+                              <span className="ml-2 hidden sm:inline">Desconectar</span>
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleConnect(account.id)}
+                            disabled={isConnecting}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            {isConnecting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Link2 className="h-4 w-4" />
+                            )}
+                            <span className="ml-2">Conectar Gmail</span>
+                          </Button>
+                        )}
+                        <Switch checked={account.is_active} />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteEmailAccount(account.id)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <Switch checked={account.is_active} />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => deleteEmailAccount(account.id)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
                   </CardContent>
                 </Card>
