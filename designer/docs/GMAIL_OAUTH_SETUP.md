@@ -205,3 +205,7 @@ SELECT title, created_at FROM alerts ORDER BY created_at DESC LIMIT 5;
 
 - **Redirect URI Error**:
   - Certifique-se de que a URL exata do navegador (`http://localhost:8080` ou `5173`) está nas credenciais do Google Cloud.
+
+
+
+

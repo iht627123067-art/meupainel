@@ -68,7 +68,7 @@ export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick
       <Table>
         <TableHeader>
           <TableRow className="border-border/50 hover:bg-transparent">
-            <TableHead className="text-muted-foreground">Título</TableHead>
+            <TableHead className="w-[40%] min-w-[300px] text-muted-foreground">Título & Descrição</TableHead>
             <TableHead className="text-muted-foreground">Fonte</TableHead>
             <TableHead className="text-muted-foreground">Status</TableHead>
             <TableHead className="text-muted-foreground">Keywords</TableHead>
@@ -88,17 +88,24 @@ export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick
                 style={{ animationDelay: `${index * 50}ms` }}
                 onClick={() => onRowClick?.(alert)}
               >
-                <TableCell className="font-medium max-w-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate">{alert.title}</span>
-                    <a
-                      href={alert.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-muted-foreground hover:text-primary transition-colors"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
+                <TableCell className="max-w-[400px]">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-base leading-tight">{alert.title}</span>
+                      <a
+                        href={alert.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-muted-foreground hover:text-primary transition-colors flex-shrink-0"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </div>
+                    {alert.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2 leading-snug" title={alert.description}>
+                        {alert.description}
+                      </p>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
@@ -125,7 +132,7 @@ export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
-                  {new Date(alert.created_at).toLocaleDateString("pt-BR")}
+                  {new Date(alert.email_date || alert.created_at).toLocaleDateString("pt-BR")}
                 </TableCell>
                 <TableCell className="text-right">
                   {alert.status === "pending" && (

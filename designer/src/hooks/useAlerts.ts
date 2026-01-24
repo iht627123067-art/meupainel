@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { TOAST_MESSAGES } from "@/constants";
 import type { Alert, AlertStatus } from "@/types";
+import {
+    fetchAlerts as fetchAlertsService,
+    updateAlertStatus,
+    fetchAlertById
+} from "@/services/api/alerts.service";
+import { supabase } from "@/integrations/supabase/client"; // Kept for edge function invoke
 
 export interface UseAlertsReturn {
     // State
@@ -42,14 +47,12 @@ export function useAlerts(): UseAlertsReturn {
     const fetchAlerts = useCallback(async () => {
         setIsLoading(true);
         try {
-            const { data, error } = await supabase
-                .from("alerts")
-                .select("*")
-                .eq("source_type", "gmail_alert")
-                .order("created_at", { ascending: false });
-
-            if (error) throw error;
-            setAlerts((data as Alert[]) || []);
+            const data = await fetchAlertsService({
+                sourceType: "gmail_alert",
+                // Select only necessary fields for the list view to save bandwidth
+                select: "id, title, description, publisher, status, created_at, url, clean_url, is_valid"
+            });
+            setAlerts(data as Alert[]);
         } catch (error: any) {
             toast({
                 title: TOAST_MESSAGES.ERROR_LOAD_ALERTS,
@@ -70,12 +73,7 @@ export function useAlerts(): UseAlertsReturn {
     const handleApprove = useCallback(
         async (id: string) => {
             try {
-                const { error } = await supabase
-                    .from("alerts")
-                    .update({ status: "approved" })
-                    .eq("id", id);
-
-                if (error) throw error;
+                await updateAlertStatus(id, "approved");
 
                 toast({ title: TOAST_MESSAGES.ALERT_APPROVED });
                 await fetchAlerts();
@@ -95,12 +93,7 @@ export function useAlerts(): UseAlertsReturn {
     const handleReject = useCallback(
         async (id: string) => {
             try {
-                const { error } = await supabase
-                    .from("alerts")
-                    .update({ status: "rejected" })
-                    .eq("id", id);
-
-                if (error) throw error;
+                await updateAlertStatus(id, "rejected");
 
                 toast({ title: TOAST_MESSAGES.ALERT_REJECTED });
                 await fetchAlerts();
@@ -120,14 +113,30 @@ export function useAlerts(): UseAlertsReturn {
     const handleExtract = useCallback(
         async (id: string) => {
             const alertToExtract = alerts.find((a) => a.id === id);
+
+            // Validation 1: Check if alert exists
             if (!alertToExtract) return;
+
+            // Validation 2: Check valid URL
+            const targetUrl = alertToExtract.clean_url || alertToExtract.url;
+            if (!targetUrl || !targetUrl.startsWith('http')) {
+                toast({
+                    title: "URL Inválida",
+                    description: "Não é possível extrair conteúdo deste alerta.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            // Validation 3: Check if already extracting (handled by state, but good to be safe)
+            if (isExtracting) return;
 
             setIsExtracting(true);
             try {
                 const { data, error } = await supabase.functions.invoke("extract-content", {
                     body: {
                         alert_id: id,
-                        url: alertToExtract.clean_url || alertToExtract.url,
+                        url: targetUrl,
                     },
                 });
 
@@ -152,8 +161,30 @@ export function useAlerts(): UseAlertsReturn {
                 setIsExtracting(false);
             }
         },
-        [alerts, toast, fetchAlerts]
+        [alerts, toast, fetchAlerts, isExtracting]
     );
+
+    // Fetch full details when selecting an alert
+    const selectAlert = useCallback(async (alert: Alert | null) => {
+        if (!alert) {
+            setSelectedAlert(null);
+            return;
+        }
+
+        // Optimistically set partial data
+        setSelectedAlert(alert);
+
+        try {
+            // Fetch full details (including content, html, etc which might be missing from list)
+            const fullAlert = await fetchAlertById(alert.id);
+            if (fullAlert) {
+                setSelectedAlert(fullAlert);
+            }
+        } catch (error) {
+            console.error("Error fetching alert details:", error);
+            // Keep showing partial data, maybe show a toast warning?
+        }
+    }, []);
 
     // Memoized toggle status filter
     const toggleStatusFilter = useCallback((status: AlertStatus) => {
@@ -198,7 +229,7 @@ export function useAlerts(): UseAlertsReturn {
 
         // Actions
         setSearchTerm,
-        setSelectedAlert,
+        setSelectedAlert: selectAlert, // Override setSelectedAlert with our enhanced version
         toggleStatusFilter,
         fetchAlerts,
         handleApprove,

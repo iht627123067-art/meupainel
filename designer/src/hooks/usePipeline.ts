@@ -75,14 +75,17 @@ export function usePipeline(): UsePipelineReturn {
             else setIsLoading(true);
 
             try {
-                const alerts = await fetchAlerts([
-                    "pending",
-                    "extracted",
-                    "classified",
-                    "approved",
-                    "published",
-                    "needs_review",
-                ]);
+                const alerts = await fetchAlerts({
+                    statusFilter: [
+                        "pending",
+                        "extracted",
+                        "classified",
+                        "approved",
+                        "published",
+                        "needs_review",
+                    ],
+                    select: "id, title, description, publisher, status, created_at, url, source_url, clean_url, is_valid, linkedin_posts(id, status, created_at)"
+                });
                 const grouped = groupAlertsByStatus(alerts);
                 setItems(grouped);
             } catch (error: any) {

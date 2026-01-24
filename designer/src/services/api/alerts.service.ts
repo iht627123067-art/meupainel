@@ -9,24 +9,40 @@ import type { Alert, AlertStatus, PipelineItem } from "@/types";
 /**
  * Fetch all alerts with optional status filter
  */
+export interface FetchAlertsOptions {
+    statusFilter?: AlertStatus[];
+    sourceType?: 'gmail_alert' | 'linkedin_post' | 'web_article';
+    select?: string;
+}
+
+/**
+ * Fetch all alerts with optional filters
+ */
 export async function fetchAlerts(
-    statusFilter?: AlertStatus[]
-): Promise<PipelineItem[]> {
+    options: FetchAlertsOptions = {}
+): Promise<any[]> {
+    const { statusFilter, sourceType, select } = options;
+
+    // Default selection if not specified (optimized for list view)
+    const selectQuery = select || "*";
+
     let query = supabase
         .from("alerts")
-        .select(
-            "id, title, description, publisher, status, created_at, url, source_url, clean_url, is_valid, linkedin_posts(id, status, created_at)"
-        )
+        .select(selectQuery)
         .order("created_at", { ascending: false });
 
     if (statusFilter && statusFilter.length > 0) {
         query = query.in("status", statusFilter);
     }
 
+    if (sourceType) {
+        query = query.eq("source_type", sourceType);
+    }
+
     const { data, error } = await query;
 
     if (error) throw error;
-    return (data as PipelineItem[]) || [];
+    return data || [];
 }
 
 /**
@@ -40,7 +56,8 @@ export async function fetchAlertById(id: string): Promise<Alert | null> {
         .single();
 
     if (error) throw error;
-    return data as Alert;
+    // Cast to unknown first to break type inference chain if needed, or just direct cast
+    return data as unknown as Alert;
 }
 
 /**

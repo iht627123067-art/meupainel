@@ -70,25 +70,49 @@ async function listGoogleAlertsEmails(
     accessToken: string,
     maxResults: number = 20
 ): Promise<GmailMessage[]> {
-    // Search for emails in the 'alertas' label that are unread
-    const query = encodeURIComponent("label:alertas is:unread");
+    // Try multiple label variants to maximize email discovery
+    // Includes both Portuguese (alertas) and English (alerts) variations
+    const queryVariants = [
+        "(label:alertas OR label:Alertas OR label:ALERTAS OR label:alerts OR label:Alerts OR label:ALERTS) is:unread",
+        "from:googlealerts-noreply@google.com is:unread",
+        "subject:\"Google Alert\" is:unread",
+    ];
 
-    const response = await fetch(
-        `https://www.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${maxResults}`,
-        {
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-            },
+    console.log("=== GMAIL QUERY DEBUG ===");
+
+    for (const queryStr of queryVariants) {
+        const query = encodeURIComponent(queryStr);
+        console.log(`Trying query: ${queryStr}`);
+
+        const response = await fetch(
+            `https://www.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${maxResults}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                },
+            }
+        );
+
+        if (!response.ok) {
+            const error = await response.text();
+            console.error(`Query failed for "${queryStr}": ${error}`);
+            continue;
         }
-    );
 
-    if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Gmail API list failed: ${error}`);
+        const data = await response.json();
+        const messages = data.messages || [];
+
+        console.log(`Query "${queryStr}" returned ${messages.length} messages`);
+
+        if (messages.length > 0) {
+            console.log(`✓ SUCCESS: Using query "${queryStr}"`);
+            console.log(`Message IDs:`, messages.map(m => m.id).slice(0, 5));
+            return messages;
+        }
     }
 
-    const data = await response.json();
-    return data.messages || [];
+    console.log(`✗ No messages found with any query variant`);
+    return [];
 }
 
 // Get email details including HTML body
@@ -129,28 +153,55 @@ async function markAsRead(accessToken: string, messageId: string): Promise<void>
     );
 }
 
-// Extract HTML body from email payload
+// Extract HTML body (or Plain Text fallback) from email payload
 function extractHtmlBody(payload: GmailMessageDetail["payload"]): string {
+    let html = "";
+    let plain = "";
+
+    // Helper to decode Base64 URL-safe to UTF-8
+    const decode = (data: string) => {
+        const text = atob(data.replace(/-/g, "+").replace(/_/g, "/"));
+        const bytes = new Uint8Array(text.length);
+        for (let i = 0; i < text.length; i++) {
+            bytes[i] = text.charCodeAt(i);
+        }
+        return new TextDecoder("utf-8").decode(bytes);
+    };
+
     // Check direct body
     if (payload.body?.data) {
-        return atob(payload.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+        // Try decoding regardless of mimetype if standard decoding is needed,
+        // but typically standard text/html is UTF-8.
+        if (payload.mimeType === "text/html" || payload.mimeType === "text/plain") {
+            html = decode(payload.body.data);
+        }
     }
 
-    // Check parts for HTML
+    // Check parts
     if (payload.parts) {
         for (const part of payload.parts) {
-            if (part.mimeType === "text/html" && part.body?.data) {
-                return atob(part.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+            if (part.body?.data) {
+                if (part.mimeType === "text/html") html = decode(part.body.data);
+                if (part.mimeType === "text/plain") plain = decode(part.body.data);
             }
-            // Check nested parts (multipart/alternative)
+
+            // Nested parts
             if (part.parts) {
-                for (const nestedPart of part.parts) {
-                    if (nestedPart.mimeType === "text/html" && nestedPart.body?.data) {
-                        return atob(nestedPart.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+                for (const nested of part.parts) {
+                    if (nested.body?.data) {
+                        if (nested.mimeType === "text/html") html = decode(nested.body.data);
+                        if (nested.mimeType === "text/plain") plain = decode(nested.body.data);
                     }
                 }
             }
         }
+    }
+
+    // Use HTML if available, otherwise wrap plain text in minimal HTML for cheerio
+    if (html) return html;
+    if (plain) {
+        console.log("No HTML body found, using Plain Text fallback.");
+        return `<html><body><pre>${plain}</pre></body></html>`;
     }
 
     return "";
@@ -162,6 +213,19 @@ function extractHeader(headers: Array<{ name: string; value: string }>, name: st
     return header?.value || "";
 }
 
+// Helper for safe date parsing
+function safeParseDate(dateStr: string | null): string {
+    if (!dateStr) return new Date().toISOString();
+    try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) throw new Error("Invalid Date");
+        return date.toISOString();
+    } catch {
+        console.warn(`Invalid date format: ${dateStr}, using current time`);
+        return new Date().toISOString();
+    }
+}
+
 // URL Cleaning utilities (from existing process-gmail)
 function extractGoogleRedirectUrl(url: string): string {
     if (!url) return "";
@@ -171,8 +235,10 @@ function extractGoogleRedirectUrl(url: string): string {
             const urlObj = new URL(url);
             const qParam = urlObj.searchParams.get("q");
             const urlParam = urlObj.searchParams.get("url");
-            if (urlParam) return decodeURIComponent(urlParam);
-            if (qParam) return decodeURIComponent(qParam);
+
+            // Fix: Do not double decode. URL params are auto-decoded by searchParams.get()
+            if (urlParam) return urlParam;
+            if (qParam) return qParam;
         } catch {
             const match = url.match(/[?&](url|q)=([^&]+)/);
             if (match) return decodeURIComponent(match[2]);
@@ -220,7 +286,16 @@ interface ExtractedArticle {
     valid: boolean;
 }
 
+function extractAlertTypeCheck(html: string): string {
+    const $ = cheerio.load(html);
+    const typeSpan = $('span[style*="font-size:12px"][style*="color:#737373"]').first();
+    return typeSpan.length ? typeSpan.text().trim() : "UNKNOWN";
+}
+
 function extractArticlesFromHtml(html: string): ExtractedArticle[] {
+    console.log("=== ARTICLE EXTRACTION DEBUG ===");
+    console.log(`Input HTML length: ${html.length} characters`);
+
     const articles: ExtractedArticle[] = [];
     const $ = cheerio.load(html);
 
@@ -230,21 +305,31 @@ function extractArticlesFromHtml(html: string): ExtractedArticle[] {
     if (typeSpan.length) {
         alertType = typeSpan.text().trim();
     }
+    console.log(`Alert Type detected: "${alertType}"`);
 
-    // Extract articles using schema.org markup
-    $('tr[itemscope][itemtype="http://schema.org/Article"]').each((_, element) => {
+    // Strategy 1: Schema.org markup
+    const schemaOrgTrs = $('tr').filter((_, el) => {
+        const itemtype = $(el).attr('itemtype');
+        return itemtype && (itemtype.includes('schema.org/Article') || itemtype.includes('schema.org/NewsArticle'));
+    });
+
+    console.log(`Strategy 1 - Schema.org <tr> matches: ${schemaOrgTrs.length}`);
+
+    schemaOrgTrs.each((idx, element) => {
         const el = $(element);
 
-        const titleEl = el.find('span[itemprop="name"]').first();
+        const titleEl = el.find('[itemprop="name"]').first();
         const linkEl = el.find('a[href]').first();
         const title = titleEl.text().trim();
         const rawUrl = linkEl.attr('href') || "";
 
-        const publisherEl = el.find('div[itemprop="publisher"] span[itemprop="name"]').first();
+        const publisherEl = el.find('[itemprop="publisher"]').first();
         const publisher = publisherEl.text().trim();
 
-        const descEl = el.find('div[itemprop="description"]').first();
+        const descEl = el.find('[itemprop="description"]').first();
         const description = descEl.text().trim();
+
+        console.log(`  Article ${idx}: title="${title.substring(0, 50)}", url="${rawUrl.substring(0, 80)}"`);
 
         if (title && rawUrl) {
             const cleaned = cleanUrl(rawUrl);
@@ -258,17 +343,102 @@ function extractArticlesFromHtml(html: string): ExtractedArticle[] {
                     clean_url: cleaned.cleanUrl,
                     valid: cleaned.valid,
                 });
+                console.log(`    ✓ Added (valid URL)`);
+            } else {
+                console.log(`    ✗ Rejected (invalid URL after cleaning)`);
             }
+        } else {
+            console.log(`    ✗ Skipped (missing title or URL)`);
         }
     });
 
+    // Strategy 2: Fallback for generic HTML structure
+    if (articles.length === 0) {
+        console.log("Strategy 1 yielded 0 articles. Trying Strategy 2 (Generic <h4><a>)...");
+
+        const h4Links = $('h4 a[href]');
+        console.log(`Strategy 2 - <h4><a> matches: ${h4Links.length}`);
+
+        h4Links.each((idx, element) => {
+            const linkEl = $(element);
+            const title = linkEl.text().trim();
+            const rawUrl = linkEl.attr('href') || "";
+
+            const container = linkEl.closest('table');
+            const description = container.find('.aa').text().trim() || "";
+            const publisher = container.find('.j').text().trim() || "";
+
+            console.log(`  Article ${idx}: title="${title.substring(0, 50)}", url="${rawUrl.substring(0, 80)}"`);
+
+            if (title && rawUrl && rawUrl.startsWith('http')) {
+                const cleaned = cleanUrl(rawUrl);
+                if (cleaned.valid) {
+                    articles.push({
+                        type: alertType,
+                        title,
+                        description,
+                        publisher,
+                        url: rawUrl,
+                        clean_url: cleaned.cleanUrl,
+                        valid: cleaned.valid,
+                    });
+                    console.log(`    ✓ Added`);
+                } else {
+                    console.log(`    ✗ Rejected (invalid URL)`);
+                }
+            } else {
+                console.log(`    ✗ Skipped`);
+            }
+        });
+    }
+
+    // Strategy 3: Regex fallback (NEW)
+    if (articles.length === 0) {
+        console.log("Strategy 2 yielded 0 articles. Trying Strategy 3 (Regex for google.com/url links)...");
+
+        const urlRegex = /href="(https?:\/\/(?:www\.)?google\.com\/url\?[^"]+)"/g;
+        const matches = [...html.matchAll(urlRegex)];
+        console.log(`Strategy 3 - Regex matches: ${matches.length}`);
+
+        matches.forEach((match, idx) => {
+            const rawUrl = match[1];
+            const cleaned = cleanUrl(rawUrl);
+
+            console.log(`  Link ${idx}: ${rawUrl.substring(0, 80)}`);
+
+            if (cleaned.valid) {
+                articles.push({
+                    type: alertType,
+                    title: "[Extracted via Regex - Check manually]",
+                    description: "Article extracted using fallback regex method",
+                    publisher: "Unknown",
+                    url: rawUrl,
+                    clean_url: cleaned.cleanUrl,
+                    valid: cleaned.valid,
+                });
+                console.log(`    ✓ Added`);
+            } else {
+                console.log(`    ✗ Rejected (invalid URL)`);
+            }
+        });
+    }
+
     // Remove duplicates
     const seen = new Set<string>();
-    return articles.filter(a => {
-        if (seen.has(a.clean_url)) return false;
+    const uniqueArticles = articles.filter(a => {
+        if (seen.has(a.clean_url)) {
+            console.log(`  Duplicate removed: ${a.clean_url.substring(0, 60)}`);
+            return false;
+        }
         seen.add(a.clean_url);
         return true;
     });
+
+    console.log(`=== EXTRACTION SUMMARY ===`);
+    console.log(`Total articles extracted: ${uniqueArticles.length}`);
+    console.log(`Duplicates removed: ${articles.length - uniqueArticles.length}`);
+
+    return uniqueArticles;
 }
 
 function extractKeywords(text: string): string[] {
@@ -367,7 +537,12 @@ Deno.serve(async (req: Request) => {
 
                         // Extract articles
                         const articles = extractArticlesFromHtml(html);
-                        console.log(`Extracted ${articles.length} articles from: ${subject}`);
+
+                        if (articles.length === 0) {
+                            console.log(`No articles found in email: ${subject} (Type: ${extractAlertTypeCheck(html)})`);
+                        } else {
+                            console.log(`Extracted ${articles.length} articles from: ${subject}`);
+                        }
 
                         // Prepare records for insertion
                         const records = articles.map(article => ({
@@ -381,7 +556,7 @@ Deno.serve(async (req: Request) => {
                             url: article.url,
                             clean_url: article.clean_url,
                             email_subject: subject,
-                            email_date: date ? new Date(date).toISOString() : null,
+                            email_date: safeParseDate(date),
                             email_id: message.id,
                             is_valid: article.valid,
                             status: "pending",
@@ -403,9 +578,13 @@ Deno.serve(async (req: Request) => {
                             }
                         }
 
-                        // Mark email as read
-                        await markAsRead(accessToken, message.id);
-                        emailsProcessed++;
+                        // Mark email as read ONLY if articles were found (to allow retrying if extraction fails)
+                        if (articles.length > 0) {
+                            await markAsRead(accessToken, message.id);
+                            emailsProcessed++;
+                        } else {
+                            console.log(`SKIPPING markAsRead for message ${message.id} because 0 articles were extracted.`);
+                        }
 
                     } catch (msgError) {
                         console.error(`Error processing message ${message.id}:`, msgError);
