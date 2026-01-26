@@ -1,0 +1,600 @@
+# Gmail Loader Skills for Antigravity
+
+## Project Overview
+GmailLoader is a Node.js application that integrates Google Gmail API and OpenAI API to fetch, classify, and organize emails automatically. This skills file defines the capabilities and integration points for Antigravity automation.
+
+---
+
+## Core Skills
+
+### 1. Gmail API Integration
+**Skill ID:** `gmail-api-fetch`
+**Description:** Authenticate and fetch emails from Gmail using OAuth2
+**Capabilities:**
+- Google OAuth2 authentication flow
+- Fetch emails from user's Gmail account
+- Read email metadata (subject, sender, date, labels)
+- Access email body content (plain text and HTML)
+- Filter emails by date range, labels, and queries
+- Handle Gmail API rate limits and pagination
+
+**Dependencies:**
+- `googleapis` package
+- Google Cloud Project with Gmail API enabled
+- OAuth2 credentials (Client ID, Client Secret)
+
+**Environment Variables Required:**
+```
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_CLIENT_CALLBACK_URI=your-callback-uri
+```
+
+**API Endpoints:**
+- `POST /auth/google` - Initiate OAuth flow
+- `GET /auth/google/callback` - Handle OAuth callback
+- `GET /api/emails/fetch` - Fetch user emails
+
+---
+
+### 2. Email Classification with OpenAI
+**Skill ID:** `openai-email-classifier`
+**Description:** Classify emails into categories using OpenAI's GPT models
+**Capabilities:**
+- Classify emails by category (Important, Social, Promotions, Spam, etc.)
+- Extract key information from email content
+- Sentiment analysis on email text
+- Priority scoring for emails
+- Generate email summaries
+- Detect action items and deadlines
+
+**Dependencies:**
+- `openai` package
+- OpenAI API key
+
+**Environment Variables Required:**
+```
+OPENAI_API_KEY=your-openai-api-key
+```
+
+**Classification Categories:**
+- Important
+- Social
+- Promotions
+- Updates
+- Forums
+- Spam
+- Personal
+- Work
+
+**API Endpoints:**
+- `POST /api/emails/classify` - Classify single email
+- `POST /api/emails/classify-batch` - Classify multiple emails
+
+---
+
+### 3. User Authentication & Session Management
+**Skill ID:** `user-auth-session`
+**Description:** Handle user authentication and session persistence
+**Capabilities:**
+- JWT-based authentication
+- Secure session management
+- Token refresh mechanism
+- User profile management
+- OAuth token storage and retrieval
+
+**Dependencies:**
+- `jsonwebtoken` package
+- `express-session` package
+
+**Environment Variables Required:**
+```
+JWT_PRIVATE_KEY=your-jwt-secret
+EXPRESS_SESSION_SECRET=your-session-secret
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-nextauth-secret
+```
+
+**API Endpoints:**
+- `POST /auth/login` - User login
+- `POST /auth/logout` - User logout
+- `GET /auth/verify` - Verify token
+- `POST /auth/refresh` - Refresh access token
+
+---
+
+### 4. Email Data Storage & Retrieval
+**Skill ID:** `email-data-management`
+**Description:** Store and manage classified email data
+**Capabilities:**
+- Store email metadata in database
+- Cache classification results
+- Query emails by filters
+- Update email status
+- Delete or archive emails
+- Export email data
+
+**Recommended Database:** PostgreSQL, MongoDB, or Supabase
+
+**Data Model:**
+```javascript
+{
+  id: UUID,
+  userId: String,
+  gmailMessageId: String,
+  subject: String,
+  from: String,
+  to: String,
+  date: DateTime,
+  snippet: String,
+  body: Text,
+  category: String,
+  priority: Number,
+  labels: Array,
+  isRead: Boolean,
+  isArchived: Boolean,
+  classificationData: JSON,
+  createdAt: DateTime,
+  updatedAt: DateTime
+}
+```
+
+**API Endpoints:**
+- `GET /api/emails` - List all emails
+- `GET /api/emails/:id` - Get single email
+- `PUT /api/emails/:id` - Update email
+- `DELETE /api/emails/:id` - Delete email
+
+---
+
+### 5. Real-time Email Synchronization
+**Skill ID:** `realtime-sync`
+**Description:** Automatically sync new emails in real-time
+**Capabilities:**
+- Gmail push notifications setup
+- Webhook handling for new emails
+- Background job processing
+- Scheduled email fetching
+- Delta sync to avoid duplicates
+
+**Dependencies:**
+- `node-cron` for scheduled tasks
+- `bull` or `agenda` for job queues
+
+**Sync Strategies:**
+- Push notifications via Gmail Pub/Sub
+- Polling at regular intervals (every 5-15 minutes)
+- On-demand manual sync
+
+**API Endpoints:**
+- `POST /api/sync/trigger` - Manual sync trigger
+- `POST /webhook/gmail` - Gmail push notification webhook
+- `GET /api/sync/status` - Get sync status
+
+---
+
+### 6. Email Dashboard & Analytics
+**Skill ID:** `email-analytics`
+**Description:** Provide insights and analytics on email patterns
+**Capabilities:**
+- Email volume statistics
+- Category distribution charts
+- Sender analytics
+- Response time tracking
+- Most active times
+- Priority email trends
+
+**Metrics Tracked:**
+- Total emails received
+- Emails by category
+- Top senders
+- Average response time
+- Unread email count
+- Archive rate
+
+**API Endpoints:**
+- `GET /api/analytics/overview` - Dashboard overview
+- `GET /api/analytics/categories` - Category breakdown
+- `GET /api/analytics/senders` - Top senders
+- `GET /api/analytics/trends` - Time-based trends
+
+---
+
+## Technical Stack
+
+### Backend
+- **Runtime:** Node.js (v16+)
+- **Framework:** Express.js
+- **Language:** JavaScript/TypeScript
+
+### APIs & Services
+- **Google Gmail API** - Email fetching
+- **OpenAI API** - Email classification
+- **OAuth2** - Authentication
+
+### Middleware & Utilities
+- `express-session` - Session management
+- `cors` - Cross-origin resource sharing
+- `helmet` - Security headers
+- `morgan` or `winston` - Logging
+- `dotenv` - Environment configuration
+
+### Development Tools
+- `nodemon` - Development auto-reload
+- `jest` - Testing framework
+- `eslint` - Code linting
+
+---
+
+## Integration Points for Antigravity
+
+### 1. Automation Triggers
+```yaml
+triggers:
+  - type: "schedule"
+    interval: "*/15 * * * *"  # Every 15 minutes
+    action: "fetch-and-classify-emails"
+  
+  - type: "webhook"
+    endpoint: "/webhook/gmail"
+    action: "process-new-email"
+  
+  - type: "event"
+    event: "email-received"
+    action: "classify-and-notify"
+```
+
+### 2. Custom Actions
+```yaml
+actions:
+  - name: "fetch-emails"
+    endpoint: "POST /api/emails/fetch"
+    auth: "bearer-token"
+    params:
+      - maxResults: 50
+      - query: "is:unread"
+  
+  - name: "classify-email"
+    endpoint: "POST /api/emails/classify"
+    auth: "bearer-token"
+    params:
+      - emailId: "${email.id}"
+  
+  - name: "send-notification"
+    type: "conditional"
+    condition: "email.category === 'Important'"
+    action: "notify-user"
+```
+
+### 3. Data Flows
+```yaml
+flows:
+  - name: "daily-email-summary"
+    schedule: "0 9 * * *"  # 9 AM daily
+    steps:
+      - fetch-emails-since-yesterday
+      - classify-all-fetched
+      - generate-summary
+      - send-email-summary
+  
+  - name: "priority-alert"
+    trigger: "email-classified"
+    condition: "priority >= 8"
+    steps:
+      - extract-key-info
+      - create-task
+      - send-push-notification
+```
+
+---
+
+## Environment Configuration
+
+### Required Environment Variables
+```bash
+# Google OAuth
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_CLIENT_CALLBACK_URI=http://localhost:3000/auth/google/callback
+
+# Authentication
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-nextauth-secret
+EXPRESS_SESSION_SECRET=your-session-secret
+JWT_PRIVATE_KEY=your-jwt-private-key
+
+# OpenAI
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# Application
+NODE_ENV=development
+PORT=3000
+WINSTON_LOG_LEVEL=info
+
+# Database (if using)
+DATABASE_URL=postgresql://user:password@localhost:5432/gmailloader
+```
+
+---
+
+## API Reference
+
+### Authentication Endpoints
+
+#### Initiate Google OAuth
+```http
+GET /auth/google
+```
+
+#### OAuth Callback
+```http
+GET /auth/google/callback?code={code}
+```
+
+#### Verify Authentication
+```http
+GET /auth/verify
+Headers: Authorization: Bearer {token}
+```
+
+### Email Management Endpoints
+
+#### Fetch Emails
+```http
+POST /api/emails/fetch
+Headers: Authorization: Bearer {token}
+Body: {
+  "maxResults": 50,
+  "query": "is:unread",
+  "pageToken": null
+}
+```
+
+#### Classify Email
+```http
+POST /api/emails/classify
+Headers: Authorization: Bearer {token}
+Body: {
+  "emailId": "msg_12345",
+  "includeAnalysis": true
+}
+```
+
+#### Get Email List
+```http
+GET /api/emails?category=Important&limit=20&offset=0
+Headers: Authorization: Bearer {token}
+```
+
+#### Get Email Details
+```http
+GET /api/emails/{emailId}
+Headers: Authorization: Bearer {token}
+```
+
+### Analytics Endpoints
+
+#### Dashboard Overview
+```http
+GET /api/analytics/overview?timeRange=7d
+Headers: Authorization: Bearer {token}
+```
+
+#### Category Statistics
+```http
+GET /api/analytics/categories
+Headers: Authorization: Bearer {token}
+```
+
+---
+
+## Use Cases for Antigravity Integration
+
+### 1. Automated Email Triage
+**Description:** Automatically fetch, classify, and route emails based on priority
+**Steps:**
+1. Schedule periodic email fetch (every 15 min)
+2. Classify each new email using OpenAI
+3. If priority >= 8, send immediate notification
+4. If category = "Spam", auto-archive
+5. Generate daily summary of important emails
+
+### 2. Smart Email Assistant
+**Description:** AI-powered email management with automated responses
+**Steps:**
+1. Monitor inbox for new emails
+2. Classify and extract action items
+3. Create tasks in project management tool
+4. Suggest response drafts for important emails
+5. Auto-respond to common queries
+
+### 3. Email Analytics Dashboard
+**Description:** Real-time insights into email patterns and productivity
+**Steps:**
+1. Continuously sync email data
+2. Calculate metrics (response time, volume, etc.)
+3. Generate visualizations
+4. Send weekly analytics report
+5. Identify optimization opportunities
+
+### 4. Priority Inbox Management
+**Description:** Focus on what matters with intelligent filtering
+**Steps:**
+1. Fetch all unread emails
+2. Classify by importance and category
+3. Create priority queue
+4. Surface urgent items first
+5. Archive or defer low-priority emails
+
+---
+
+## Security Considerations
+
+### OAuth Token Management
+- Store refresh tokens securely (encrypted in DB)
+- Implement token rotation
+- Revoke access on logout
+- Handle token expiration gracefully
+
+### Data Privacy
+- Encrypt sensitive email content
+- Implement GDPR-compliant data handling
+- Provide data export functionality
+- Allow users to delete all data
+
+### API Security
+- Use HTTPS only
+- Implement rate limiting
+- Validate all inputs
+- Use security headers (helmet.js)
+- Implement CSRF protection
+
+### Logging & Monitoring
+- Log all API requests
+- Monitor for suspicious activity
+- Alert on authentication failures
+- Track API usage and quota
+
+---
+
+## Error Handling
+
+### Common Error Scenarios
+1. **Gmail API Rate Limit Exceeded**
+   - Implement exponential backoff
+   - Queue requests for later processing
+   - Notify user of delay
+
+2. **OpenAI API Failure**
+   - Retry with exponential backoff
+   - Use cached classification if available
+   - Fall back to rule-based classification
+
+3. **OAuth Token Expired**
+   - Automatically refresh token
+   - Re-authenticate if refresh fails
+   - Preserve user session
+
+4. **Network Timeout**
+   - Retry failed requests
+   - Implement circuit breaker pattern
+   - Queue for background processing
+
+---
+
+## Performance Optimization
+
+### Caching Strategy
+- Cache email metadata (Redis)
+- Cache classification results
+- Cache user preferences
+- Implement CDN for static assets
+
+### Batch Processing
+- Classify emails in batches (10-20 at a time)
+- Use async/await for parallel processing
+- Implement job queues for heavy tasks
+
+### Database Optimization
+- Index frequently queried fields
+- Use pagination for large result sets
+- Implement database connection pooling
+- Archive old emails to cold storage
+
+---
+
+## Testing
+
+### Unit Tests
+- Test Gmail API integration
+- Test OpenAI classification logic
+- Test authentication flow
+- Test data models
+
+### Integration Tests
+- Test full email fetch-to-classify flow
+- Test OAuth callback handling
+- Test webhook processing
+- Test API endpoints
+
+### End-to-End Tests
+- Test user registration and login
+- Test email sync and classification
+- Test dashboard functionality
+- Test mobile responsiveness
+
+---
+
+## Deployment
+
+### Production Checklist
+- [ ] Set all environment variables
+- [ ] Configure OAuth redirect URIs
+- [ ] Set up SSL/TLS certificates
+- [ ] Configure production database
+- [ ] Set up logging and monitoring
+- [ ] Configure backup strategy
+- [ ] Implement rate limiting
+- [ ] Enable security headers
+- [ ] Test all API endpoints
+- [ ] Perform load testing
+
+### Recommended Hosting
+- **Backend:** Render, Heroku, Railway, or AWS
+- **Database:** Supabase, PostgreSQL on AWS RDS
+- **Cache:** Redis Cloud or Upstash
+- **Monitoring:** Sentry, LogRocket, or Datadog
+
+---
+
+## Maintenance & Updates
+
+### Regular Maintenance Tasks
+- Monitor API quota usage
+- Review and rotate API keys
+- Update dependencies monthly
+- Review error logs weekly
+- Backup database daily
+- Clean up old data quarterly
+
+### Update Strategy
+- Follow semantic versioning
+- Test updates in staging first
+- Implement blue-green deployment
+- Maintain changelog
+- Notify users of breaking changes
+
+---
+
+## Support & Documentation
+
+### Developer Resources
+- [Google Gmail API Docs](https://developers.google.com/gmail/api)
+- [OpenAI API Docs](https://platform.openai.com/docs)
+- [Express.js Guide](https://expressjs.com/)
+- [OAuth2 Best Practices](https://oauth.net/2/)
+
+### Project Links
+- **Repository:** https://github.com/manlikeNacho/gmailLoader
+- **Live Demo:** https://gmailloader.onrender.com
+- **Issues:** https://github.com/manlikeNacho/gmailLoader/issues
+
+---
+
+## License
+This project follows the repository's original license. Check the [LICENSE](https://github.com/manlikeNacho/gmailLoader/blob/main/LICENSE) file for details.
+
+---
+
+## Contributing
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+5. Follow code style guidelines
+
+---
+
+*Last Updated: January 2026*
+*Version: 1.0.0*

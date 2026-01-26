@@ -19,16 +19,17 @@ export interface ExtractionResult {
  */
 export async function extractContent(
     alertId: string,
-    url: string
+    url: string,
+    translate: boolean = false
 ): Promise<ExtractionResult> {
     try {
         const result = await withRetry(
             async () => {
                 const { data, error } = await withTimeout(
                     supabase.functions.invoke("extract-content", {
-                        body: { alert_id: alertId, url },
+                        body: { alert_id: alertId, url, translate },
                     }),
-                    30000, // 30 second timeout
+                    60000, // 60 second timeout to allow for extraction + translation
                     "Content extraction timed out"
                 );
 
@@ -81,9 +82,10 @@ export async function extractContent(
  */
 export async function retryExtraction(
     alertId: string,
-    url: string
+    url: string,
+    translate: boolean = false
 ): Promise<ExtractionResult> {
     // Reset status to pending before retry
     await updateAlertStatus(alertId, "pending");
-    return extractContent(alertId, url);
+    return extractContent(alertId, url, translate);
 }

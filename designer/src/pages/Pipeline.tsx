@@ -8,7 +8,10 @@ import { PipelineCard } from "@/components/pipeline/PipelineCard";
 import {
   Sparkles,
   RefreshCw,
+  Languages,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { StageId } from "@/types";
 
@@ -30,6 +33,8 @@ export default function Pipeline() {
     getNextStageHelper: getNextStage,
     getPrevStageHelper: getPrevStage,
     getActionLabel,
+    autoTranslate,
+    setAutoTranslate,
   } = usePipeline();
 
 
@@ -59,7 +64,18 @@ export default function Pipeline() {
               Acompanhe o fluxo de processamento dos conteúdos
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg border">
+              <Languages className="h-4 w-4 text-primary" />
+              <Label htmlFor="auto-translate" className="text-xs font-medium cursor-pointer">
+                Traduzir para PT
+              </Label>
+              <Switch
+                id="auto-translate"
+                checked={autoTranslate}
+                onCheckedChange={setAutoTranslate}
+              />
+            </div>
             <Badge variant="outline" className="px-3 py-1.5 hidden sm:flex">
               <Sparkles className="h-3.5 w-3.5 mr-1.5" />
               Total: {totalItems} itens

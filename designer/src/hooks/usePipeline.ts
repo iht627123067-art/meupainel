@@ -33,9 +33,11 @@ export interface UsePipelineReturn {
     processingId: string | null;
     stages: typeof PIPELINE_STAGES;
     totalItems: number;
+    autoTranslate: boolean;
 
     // Actions
     fetchItems: (showRefresh?: boolean) => Promise<void>;
+    setAutoTranslate: (value: boolean) => void;
     moveToStageAction: (id: string, newStatus: StageId) => Promise<void>;
     rejectItem: (id: string) => Promise<void>;
     deleteItem: (id: string) => Promise<void>;
@@ -66,6 +68,7 @@ export function usePipeline(): UsePipelineReturn {
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [processingId, setProcessingId] = useState<string | null>(null);
+    const [autoTranslate, setAutoTranslate] = useState(false);
     const { toast } = useToast();
 
     // Memoized fetch function
@@ -166,9 +169,9 @@ export function usePipeline(): UsePipelineReturn {
         async (id: string, url: string) => {
             setProcessingId(id);
             try {
-                await advanceAlert(id, "pending", url);
+                await advanceAlert(id, "pending", url, undefined, autoTranslate);
                 toast({
-                    title: TOAST_MESSAGES.CONTENT_EXTRACTED,
+                    title: autoTranslate ? "Extraído e Traduzido!" : TOAST_MESSAGES.CONTENT_EXTRACTED,
                 });
                 await fetchItems(true);
             } catch (error: any) {
@@ -265,7 +268,7 @@ export function usePipeline(): UsePipelineReturn {
                     .find((i) => i.id === id);
                 if (!item) throw new Error("Item not found");
 
-                await retryAlert(id, item.status as StageId, url);
+                await retryAlert(id, item.status as StageId, url, autoTranslate);
                 toast({
                     title: "Tentando novamente...",
                 });
@@ -309,9 +312,11 @@ export function usePipeline(): UsePipelineReturn {
         processingId,
         stages: PIPELINE_STAGES,
         totalItems,
+        autoTranslate,
 
         // Actions
         fetchItems,
+        setAutoTranslate,
         moveToStageAction,
         rejectItem,
         deleteItem,

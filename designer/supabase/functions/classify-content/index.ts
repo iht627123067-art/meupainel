@@ -61,11 +61,55 @@ async function classifyWithOpenAI(prompt: string, apiKey: string): Promise<any> 
 }
 
 /**
+ * Classify with OpenRouter
+ */
+async function classifyWithOpenRouter(prompt: string, apiKey: string): Promise<any> {
+    try {
+        console.log(`🤖 Attempting OpenRouter classification (google/gemini-2.0-flash-exp:free)`);
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`,
+                "HTTP-Referer": "https://supabase.com", // Required by some OpenRouter models
+                "X-Title": "Meupainel"
+            },
+            body: JSON.stringify({
+                model: "google/gemini-2.0-flash-exp:free",
+                messages: [
+                    { role: "system", content: "Você é um assistente especializado em classificação de notícias. Responda apenas com JSON no formato solicitado." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.3,
+            }),
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const text = data.choices?.[0]?.message?.content;
+            if (text) {
+                console.log(`📡 OpenRouter response received`);
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) return JSON.parse(jsonMatch[0]);
+                return JSON.parse(text);
+            }
+        } else {
+            const errText = await response.text();
+            console.warn(`      ⚠️ OpenRouter failed: ${response.status} - ${errText}`);
+            throw new Error(`OpenRouter error: ${response.status}`);
+        }
+    } catch (e: any) {
+        console.warn(`      ⚠️ OpenRouter throw: ${e.message}`);
+        throw e;
+    }
+}
+
+/**
  * Classify with Gemini 1.5 Flash
  */
 async function classifyWithGemini(prompt: string, apiKey: string): Promise<any> {
     // Try multiple model variations
-    const models = ["gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash", "gemini-pro"];
+    const models = ["gemini-2.0-flash-exp", "gemini-1.5-flash", "gemini-pro"];
     let lastError = null;
 
     for (const model of models) {
@@ -138,6 +182,7 @@ Deno.serve(async (req: Request) => {
         const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const geminiKey = Deno.env.get("GEMINI_API_KEY");
         const openAIKey = Deno.env.get("OPENAI_API_KEY");
+        const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
         const supabase = createClient(supabaseUrl, supabaseKey);
 
         const body = await req.json().catch(() => ({}));
@@ -211,8 +256,18 @@ Deno.serve(async (req: Request) => {
         let result = null;
         let usedProvider = "";
 
-        // Prioridade: OpenAI se disponível
-        if (openAIKey) {
+        // Prioridade: OpenRouter se disponível
+        if (openRouterKey) {
+            try {
+                result = await classifyWithOpenRouter(prompt, openRouterKey);
+                usedProvider = "openrouter";
+            } catch (err) {
+                console.error("OpenRouter classification failed, trying fallbacks:", err);
+            }
+        }
+
+        // Fallback: OpenAI
+        if (!result && openAIKey) {
             try {
                 result = await classifyWithOpenAI(prompt, openAIKey);
                 usedProvider = "openai";
@@ -228,7 +283,7 @@ Deno.serve(async (req: Request) => {
         }
 
         if (!result || typeof result !== 'object') {
-            throw new Error("No AI provider (OpenAI/Gemini) was able to provide a valid classification");
+            throw new Error("No AI provider (OpenRouter/OpenAI/Gemini) was able to provide a valid classification");
         }
 
         const destination = result.destination || "archive";
@@ -257,6 +312,33 @@ Deno.serve(async (req: Request) => {
             .eq("id", alert_id);
 
         console.log(`\n✅ ========== CLASSIFICATION COMPLETE ==========\n`);
+
+        // 5. AUTO-GENERATION FAST TRACK
+        // If high confidence and LinkedIn destination, trigger post generation in background
+        if (destination === "linkedin" && confidence_score > 0.8) {
+            console.log(`🚀 [FAST TRACK] High confidence detected (${confidence_score}). Triggering auto-post generation...`);
+
+            // Get user_id for the alert to pass to the generator
+            const { data: alertData } = await supabase
+                .from("alerts")
+                .select("user_id")
+                .eq("id", alert_id)
+                .single();
+
+            if (alertData?.user_id) {
+                // Trigger background generation (non-blocking)
+                supabase.functions.invoke("generate-linkedin-post", {
+                    body: {
+                        alert_id,
+                        user_id: alertData.user_id,
+                        is_auto: true // Signal it was auto-triggered
+                    }
+                }).then(({ error }) => {
+                    if (error) console.error("❌ Auto-generation failed:", error.message);
+                    else console.log("✅ Auto-generation started successfully");
+                });
+            }
+        }
 
         return new Response(
             JSON.stringify({

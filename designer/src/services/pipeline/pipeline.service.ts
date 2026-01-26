@@ -16,12 +16,13 @@ export async function advanceAlert(
     alertId: string,
     currentStage: StageId,
     url?: string,
-    userId?: string
+    userId?: string,
+    translate: boolean = false
 ): Promise<void> {
     switch (currentStage) {
         case "pending":
             if (!url) throw new Error("URL required for extraction");
-            await extractContent(alertId, url);
+            await extractContent(alertId, url, translate);
             break;
 
         case "extracted":
@@ -72,13 +73,14 @@ export async function removeAlert(alertId: string): Promise<void> {
 export async function retryAlert(
     alertId: string,
     currentStage: StageId,
-    url?: string
+    url?: string,
+    translate: boolean = false
 ): Promise<void> {
     switch (currentStage) {
         case "needs_review":
         case "pending":
             if (!url) throw new Error("URL required for extraction retry");
-            await retryExtraction(alertId, url);
+            await retryExtraction(alertId, url, translate);
             break;
 
         case "extracted":

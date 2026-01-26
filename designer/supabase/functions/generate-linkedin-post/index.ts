@@ -54,7 +54,7 @@ Responda APENAS com um JSON válido:
 }`;
 
     const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
         {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -155,9 +155,9 @@ Responda APENAS com um JSON válido:
   "tone": "profissional/inspirador/educativo"
 }`;
 
-    // Using 2.5 Flash as fallback
+    // Using 1.5 Flash as fallback
     const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
         {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -410,6 +410,82 @@ async function generateWithOpenAI(
     }
 }
 
+/**
+ * Generate LinkedIn post using OpenRouter
+ */
+async function generateWithOpenRouter(
+    title: string,
+    description: string,
+    content: string,
+    apiKey: string
+): Promise<PostDraft> {
+    const prompt = `Você é um especialista em criar posts profissionais para LinkedIn.
+    Com base no conteúdo a seguir, crie um post PROFISSIONAL e ENGAJADOR para LinkedIn.
+
+    O post deve:
+    - Ter entre 150-300 palavras
+    - Começar com um gancho que capture atenção
+    - Usar parágrafos curtos (máximo 2-3 linhas)
+    - Incluir emojis estratégicos (não exagerar)
+    - Ter uma chamada para ação no final
+    - Incluir 3-5 hashtags relevantes
+    - Manter tom profissional mas acessível
+
+    TÍTULO DO ARTIGO: ${title}
+    DESCRIÇÃO: ${description}
+    CONTEÚDO (resumo): ${content.slice(0, 3000)}
+
+    Responda APENAS com um JSON válido:
+    {
+      "content": "texto do post aqui...",
+      "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"],
+      "call_to_action": "pergunta ou chamada para interação",
+      "tone": "profissional/inspirador/educativo"
+    }`;
+
+    try {
+        console.log(`🤖 Attempting OpenRouter post generation (google/gemini-2.0-flash-exp:free)`);
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`,
+                "HTTP-Referer": "https://supabase.com",
+                "X-Title": "Meupainel"
+            },
+            body: JSON.stringify({
+                model: "google/gemini-2.0-flash-exp:free",
+                messages: [
+                    { role: "system", content: "Você é um redator sênior especializado em LinkedIn. Responda apenas com JSON." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.7,
+            }),
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const text = data.choices?.[0]?.message?.content;
+            if (text) {
+                console.log(`📡 OpenRouter response received`);
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                const jsonStr = jsonMatch ? jsonMatch[0] : text;
+                const result = JSON.parse(jsonStr);
+                return {
+                    content: result.content || "",
+                    hashtags: result.hashtags || [],
+                    call_to_action: result.call_to_action || "",
+                    tone: result.tone || "profissional",
+                };
+            }
+        }
+        throw new Error(`OpenRouter failed: ${response.status}`);
+    } catch (e: any) {
+        console.warn(`      ⚠️ OpenRouter throw: ${e.message}`);
+        throw e;
+    }
+}
+
 Deno.serve(async (req: Request) => {
     if (req.method === "OPTIONS") {
         return new Response("ok", { headers: corsHeaders });
@@ -422,12 +498,14 @@ Deno.serve(async (req: Request) => {
         const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
         const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
         const openAIKey = Deno.env.get("OPENAI_API_KEY");
+        const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
         const vertexApiKey = Deno.env.get("VERTEX_API_KEY") || Deno.env.get("GEMINI_API_KEY"); // Allow sharing key if same provider type
         const supabase = createClient(supabaseUrl, supabaseKey);
 
         const body = await req.json();
-        alert_id = body.alert_id; // Capture for error logging
+        alert_id = body.alert_id;
         const user_id = body.user_id;
+        const is_auto = body.is_auto || false;
 
         if (!alert_id || !user_id) {
             return new Response(
@@ -475,7 +553,23 @@ Deno.serve(async (req: Request) => {
         let generated = false;
         let usedProvider = "";
 
-        // 1. Try OpenAI (Priority)
+        // 1. Try OpenRouter (New Priority)
+        if (!generated && openRouterKey) {
+            try {
+                draft = await generateWithOpenRouter(
+                    alert.title,
+                    alert.description || "",
+                    content?.cleaned_content || alert.description || "",
+                    openRouterKey
+                );
+                generated = true;
+                usedProvider = "openrouter";
+            } catch (err) {
+                console.error("OpenRouter post generation failed, trying fallbacks:", err);
+            }
+        }
+
+        // 2. Try OpenAI
         if (!generated && openAIKey) {
             try {
                 draft = await generateWithOpenAI(
@@ -491,7 +585,7 @@ Deno.serve(async (req: Request) => {
             }
         }
 
-        // 2. Try Gemini (Google AI Studio)
+        // 3. Try Gemini (Google AI Studio)
         if (!generated && geminiApiKey) {
             try {
                 draft = await generateWithGemini(
@@ -507,7 +601,7 @@ Deno.serve(async (req: Request) => {
             }
         }
 
-        // 3. Try Vertex AI (if others failed or keys missing)
+        // 4. Try Vertex AI (if others failed or keys missing)
         if (!generated && vertexApiKey) {
             try {
                 draft = await generateWithVertex(
@@ -523,7 +617,7 @@ Deno.serve(async (req: Request) => {
             }
         }
 
-        // 4. Fallback to Simple Post
+        // 5. Fallback to Simple Post
         if (!generated) {
             console.warn("[generate-linkedin-post] AI generation failed or keys missing. Using simple generation.");
             draft = generateSimplePost(alert.title, alert.description || "");
@@ -542,6 +636,15 @@ Deno.serve(async (req: Request) => {
 
 ${draft.hashtags.join(" ")}`;
 
+        // Prepara metadados JSONB
+        const aiMetadata = {
+            tone: draft.tone,
+            hashtags: draft.hashtags,
+            call_to_action: draft.call_to_action,
+            provider: usedProvider,
+            generated_at: new Date().toISOString()
+        };
+
         // Check if post already exists for this alert
         const { data: existingPost } = await supabase
             .from("linkedin_posts")
@@ -551,26 +654,29 @@ ${draft.hashtags.join(" ")}`;
 
         if (existingPost) {
             // Update existing draft
-            const { error: updateError } = await supabase
+            const { error: updateError } = await (supabase
                 .from("linkedin_posts")
                 .update({
                     draft_content: fullContent,
+                    ai_metadata: aiMetadata,
                     status: "draft",
-                })
-                .eq("id", existingPost.id);
+                    updated_at: new Date().toISOString()
+                } as any)
+                .eq("id", existingPost.id));
 
             if (updateError) throw updateError;
         } else {
             // Create new post
-            const { error: insertError } = await supabase
+            const { error: insertError } = await (supabase
                 .from("linkedin_posts")
                 .insert({
                     user_id,
                     alert_id,
-                    classification_id: classification?.id || null,
                     draft_content: fullContent,
+                    ai_metadata: aiMetadata,
+                    auto_generated: is_auto,
                     status: "draft",
-                });
+                } as any));
 
             if (insertError) throw insertError;
         }

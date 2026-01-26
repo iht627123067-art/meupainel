@@ -29,7 +29,7 @@ export async function classifyContent(
                     supabase.functions.invoke("classify-content", {
                         body: { alert_id: alertId },
                     }),
-                    45000, // 45 second timeout for AI processing
+                    60000, // 60 second timeout for AI processing
                     "Classification timed out"
                 );
 

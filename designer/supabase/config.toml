@@ -1,1 +1,7 @@
 project_id = "peoyosdnthdpnhejivqo"
+
+[functions.classify-content]
+verify_jwt = false
+
+[functions.generate-linkedin-post]
+verify_jwt = false

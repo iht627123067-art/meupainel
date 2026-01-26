@@ -144,6 +144,8 @@ async function resolveGoogleNewsUrl(url: string): Promise<string> {
  */
 async function fetchContentAsMarkdown(url: string): Promise<{ markdown: string; wordCount: number, source: string }> {
     const jinaUrl = `https://r.jina.ai/${url}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for Jina
 
     try {
         const response = await fetch(jinaUrl, {
@@ -151,7 +153,9 @@ async function fetchContentAsMarkdown(url: string): Promise<{ markdown: string; 
                 "Accept": "text/markdown",
                 "User-Agent": "Mozilla/5.0 (compatible; ContentExtractor/1.0)",
             },
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             throw new Error(`Jina status: ${response.status}`);
@@ -268,6 +272,51 @@ async function fallbackExtraction(url: string): Promise<{ markdown: string; word
 }
 
 /**
+ * Translates text to Portuguese if needed using OpenRouter
+ */
+async function translateText(text: string, label: string, apiKey: string): Promise<string> {
+    if (!text || text.trim().length < 5) return text;
+
+    console.log(`🤖 Attempting translation for ${label}...`);
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`,
+                "HTTP-Referer": "https://supabase.com",
+                "X-Title": "Meupainel"
+            },
+            body: JSON.stringify({
+                model: "google/gemini-2.0-flash-exp:free",
+                messages: [
+                    {
+                        role: "system",
+                        content: "Você é um tradutor especializado. Se o texto a seguir NÃO estiver em Português, traduza-lo para Português (Brasil). Se já estiver em Português, retorne o texto ORIGINAL. Mantenha formatação Markdown. Responda APENAS com a tradução ou texto original."
+                    },
+                    { role: "user", content: text }
+                ],
+                temperature: 0.1,
+            }),
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const result = data.choices?.[0]?.message?.content?.trim();
+            if (result) {
+                console.log(`✅ Translation complete for ${label}`);
+                return result;
+            }
+        }
+        console.warn(`⚠️ Translation failed for ${label}: ${response.status}`);
+        return text;
+    } catch (e) {
+        console.error(`❌ Translation error for ${label}:`, e);
+        return text;
+    }
+}
+
+/**
  * Clean Markdown
  */
 function cleanMarkdownContent(markdown: string): string {
@@ -301,10 +350,14 @@ Deno.serve(async (req: Request) => {
     try {
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
         const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+        const openRouterKey = Deno.env.get("OPENROUTER_API_KEY");
         const supabase = createClient(supabaseUrl, supabaseKey);
 
         const body = await req.json().catch(() => ({}));
-        const { alert_id, url } = body;
+        const { alert_id, url, translate = false } = body;
+
+        console.log(`\n🚀 ========== STARTING EXTRACTION ==========`);
+        console.log(`📋 Alert ID: ${alert_id} | Translate: ${translate}`);
 
         if (!alert_id) {
             return new Response(
@@ -312,9 +365,6 @@ Deno.serve(async (req: Request) => {
                 { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
         }
-
-        console.log(`\n🚀 ========== STARTING EXTRACTION ==========`);
-        console.log(`📋 Alert ID: ${alert_id}`);
 
         // 0. Get alert details
         const { data: alert, error: alertError } = await supabase
@@ -349,18 +399,37 @@ Deno.serve(async (req: Request) => {
 
         // Clean content
         const cleanedContent = cleanMarkdownContent(markdown);
-        const cleanedWordCount = cleanedContent.split(/\s+/).filter(w => w.length > 0).length;
-        const qualityScore = calculateQualityScore(cleanedContent, cleanedWordCount);
 
-        console.log(`✅ Extraction complete! Score: ${qualityScore}`);
+        // 3. Translation Step (if OpenRouter available)
+        let finalTitle = alert?.title || "";
+        let finalContent = cleanedContent;
+
+        if (openRouterKey && translate) {
+            console.log(`\n🌍 STEP 4: Translating content (requested)...`);
+            // Translate title
+            if (finalTitle) {
+                finalTitle = await translateText(finalTitle, "Title", openRouterKey);
+            }
+            // Translate content
+            if (finalContent.length > 50) {
+                finalContent = await translateText(finalContent, "Content", openRouterKey);
+            }
+        } else if (openRouterKey) {
+            console.log(`\n🌍 Translation skipped (not requested or no OpenRouter key).`);
+        }
+
+        const cleanedWordCount = finalContent.split(/\s+/).filter(w => w.length > 0).length;
+        const qualityScore = calculateQualityScore(finalContent, cleanedWordCount);
+
+        console.log(`✅ Extraction & Translation complete! Score: ${qualityScore}`);
 
         // 3. Upsert extracted content
         const { error: insertError } = await supabase
             .from("extracted_content")
             .upsert({
                 alert_id,
-                markdown_content: markdown,
-                cleaned_content: cleanedContent,
+                markdown_content: markdown, // Keep original markdown
+                cleaned_content: finalContent, // Store translated/cleaned content
                 word_count: cleanedWordCount,
                 quality_score: qualityScore,
                 extraction_status: 'success',
@@ -374,7 +443,8 @@ Deno.serve(async (req: Request) => {
             .from("alerts")
             .update({
                 status: "extracted",
-                clean_url: urlToExtract
+                clean_url: urlToExtract,
+                title: finalTitle // Update title with translation if any
             })
             .eq("id", alert_id);
 
