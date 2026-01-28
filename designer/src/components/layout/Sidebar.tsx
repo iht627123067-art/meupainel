@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Newspaper,
   Zap,
+  Mic,
   LogOut,
   AlertTriangle,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const menuItems = [
   { icon: Mail, label: "Alertas Gmail", path: "/alerts" },
   { icon: Rss, label: "Feeds RSS", path: "/rss" },
   { icon: Zap, label: "Pipeline", path: "/pipeline" },
+  { icon: Mic, label: "Podcast Diário", path: "/podcast" },
   { icon: AlertTriangle, label: "Revisão Manual", path: "/review" },
   { icon: FileText, label: "Conteúdos", path: "/content" },
   { icon: Linkedin, label: "LinkedIn", path: "/linkedin" },

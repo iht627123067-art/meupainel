@@ -17,6 +17,7 @@ const RssPage = lazy(() => import("./pages/Rss"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Content = lazy(() => import("./pages/Content"));
 const ReviewPage = lazy(() => import("./pages/Review"));
+const Podcast = lazy(() => import("./pages/Podcast"));
 const OAuthCallback = lazy(() => import("./pages/OAuthCallback"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
@@ -41,6 +42,7 @@ const App = () => (
             <Route path="/feed" element={<Feed />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/pipeline" element={<Pipeline />} />
+            <Route path="/podcast" element={<Podcast />} />
             <Route path="/review" element={<ReviewPage />} />
             <Route path="/content" element={<Content />} />
             <Route path="/linkedin" element={<LinkedIn />} />

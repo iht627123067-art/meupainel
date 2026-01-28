@@ -15,9 +15,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Alert, AlertStatus } from "@/types";
+import { BulkActionsBar } from "@/components/shared/BulkActionsBar";
+import { GenerationProgressModal } from "@/components/shared/GenerationProgressModal";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 export default function Alerts() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [progressStage, setProgressStage] = useState<'preparing' | 'generating' | 'saving' | 'complete' | 'error'>('preparing');
+  const [generationError, setGenerationError] = useState<string>();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Use custom hook with all business logic
   const {
@@ -59,8 +72,8 @@ export default function Alerts() {
   );
 
   const handleRowClick = useCallback(
-    (alert: any) => {
-      setSelectedAlert(alert as Alert);
+    (alert: Alert) => {
+      setSelectedAlert(alert);
     },
     [setSelectedAlert]
   );
@@ -69,8 +82,133 @@ export default function Alerts() {
     setSelectedAlert(null);
   }, [setSelectedAlert]);
 
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedIds.size === filteredAlerts.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredAlerts.map(a => a.id)));
+    }
+  }, [selectedIds.size, filteredAlerts]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleSendToPodcast = useCallback(async (mode: 'deep' | 'quick' | 'chatgpt-full' | 'chatgpt-quick') => {
+    if (!user || selectedIds.size === 0) return;
+
+    setIsGenerating(true);
+    setProgressStage('preparing');
+
+    try {
+      setProgressStage('generating');
+      const { data, error } = await supabase.functions.invoke('generate-personalized-podcast', {
+        body: {
+          user_id: user.id,
+          mode,
+          specific_alert_ids: Array.from(selectedIds)
+        }
+      });
+
+      if (error) throw error;
+
+      setProgressStage('saving');
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setProgressStage('complete');
+      setSelectedIds(new Set());
+    } catch (error) {
+      console.error('Error generating podcast:', error);
+      setProgressStage('error');
+      setGenerationError(error instanceof Error ? error.message : 'Erro ao gerar podcast');
+    }
+  }, [user, selectedIds]);
+
+  const handleBatchApprove = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+
+    try {
+      const { error } = await supabase
+        .from('alerts')
+        .update({ status: 'approved' })
+        .in('id', Array.from(selectedIds));
+
+      if (error) throw error;
+
+      toast({
+        title: `${selectedIds.size} itens aprovados!`,
+        description: "Os alertas foram movidos para o pipeline"
+      });
+
+      setSelectedIds(new Set());
+      fetchAlerts();
+    } catch (error) {
+      toast({
+        title: "Erro ao aprovar itens",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    }
+  }, [selectedIds, fetchAlerts, toast]);
+
+  const handleSendToReview = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+
+    try {
+      const { error } = await supabase
+        .from('alerts')
+        .update({ status: 'needs_review' })
+        .in('id', Array.from(selectedIds));
+
+      if (error) throw error;
+
+      toast({
+        title: `${selectedIds.size} enviados para revisão`,
+        description: "Os alertas estão disponíveis na aba de Revisão Manual"
+      });
+
+      setSelectedIds(new Set());
+      fetchAlerts();
+      navigate("/review");
+    } catch (error) {
+      toast({
+        title: "Erro ao enviar para revisão",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    }
+  }, [selectedIds, fetchAlerts, toast, navigate]);
+
+  const handleSendToResearch = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const idsParam = Array.from(selectedIds).join(',');
+    navigate(`/research?context_ids=${idsParam}`);
+  }, [selectedIds, navigate]);
+
   return (
     <DashboardLayout>
+      <BulkActionsBar
+        selectedCount={selectedIds.size}
+        maxSelection={25}
+        onClear={handleClearSelection}
+        onSendToPodcast={handleSendToPodcast}
+        onBatchApprove={handleBatchApprove}
+        onSendToReview={handleSendToReview}
+        onSendToResearch={handleSendToResearch}
+        isProcessing={isGenerating}
+      />
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -146,6 +284,9 @@ export default function Alerts() {
           onReject={handleReject}
           isLoading={isLoading}
           onRowClick={handleRowClick}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onSelectAll={handleSelectAll}
         />
 
         {/* Import Modal */}
@@ -164,6 +305,14 @@ export default function Alerts() {
           onReject={handleReject}
           onExtract={handleExtract}
           isExtracting={isExtracting}
+        />
+
+        {/* Generation Progress Modal */}
+        <GenerationProgressModal
+          isOpen={isGenerating}
+          onClose={() => setIsGenerating(false)}
+          stage={progressStage}
+          error={generationError}
         />
       </div>
     </DashboardLayout>

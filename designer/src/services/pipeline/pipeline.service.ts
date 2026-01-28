@@ -3,7 +3,7 @@
  * Orchestrates the entire pipeline workflow
  */
 
-import { extractContent, retryExtraction } from "../api/content.service";
+import { extractContent, retryExtraction, saveManualContent } from "../api/content.service";
 import { classifyContent, retryClassification } from "../api/classification.service";
 import { generateLinkedInPost } from "../api/linkedin.service";
 import { updateAlertStatus, deleteAlert } from "../api/alerts.service";

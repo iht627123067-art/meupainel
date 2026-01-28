@@ -17,10 +17,14 @@ import {
     TrendingUp,
     Calendar,
     Hash,
+    Save,
+    Pencil,
+    X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
+import { Textarea } from "@/components/ui/textarea";
 
 interface ExtractedContent {
     id: string;
@@ -48,6 +52,8 @@ export default function Content() {
     const [contents, setContents] = useState<ExtractedContent[]>([]);
     const [selectedContent, setSelectedContent] = useState<ExtractedContent | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editContent, setEditContent] = useState("");
     const [processingId, setProcessingId] = useState<string | null>(null);
     const { toast } = useToast();
 
@@ -180,6 +186,55 @@ export default function Content() {
         } finally {
             setProcessingId(null);
         }
+    };
+
+    const handleSaveManualEdit = async () => {
+        if (!selectedContent) return;
+
+        try {
+            setProcessingId(selectedContent.id);
+            const wordCount = editContent.split(/\s+/).filter(w => w.length > 0).length;
+
+            const { error } = await supabase
+                .from("extracted_content")
+                .update({
+                    cleaned_content: editContent,
+                    markdown_content: editContent,
+                    word_count: wordCount,
+                    quality_score: 1.0,
+                    extraction_status: 'success'
+                })
+                .eq("id", selectedContent.id);
+
+            if (error) throw error;
+
+            toast({
+                title: "Conteúdo atualizado",
+                description: "O conteúdo foi salvo manualmente com sucesso",
+            });
+
+            setIsEditing(false);
+            fetchContents();
+        } catch (error: any) {
+            toast({
+                title: "Erro ao salvar",
+                description: error.message,
+                variant: "destructive",
+            });
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const startEditing = () => {
+        if (!selectedContent) return;
+        setEditContent(selectedContent.cleaned_content || selectedContent.markdown_content || "");
+        setIsEditing(true);
+    };
+
+    const cancelEditing = () => {
+        setIsEditing(false);
+        setEditContent("");
     };
 
     const getQualityBadge = (score: number) => {
@@ -356,44 +411,89 @@ export default function Content() {
                                             Rejeitar
                                         </Button>
                                         <Button
-                                            onClick={() =>
-                                                handleReExtract(
-                                                    selectedContent.id,
-                                                    selectedContent.alert_id,
-                                                    selectedContent.alerts.clean_url || selectedContent.alerts.url
-                                                )
-                                            }
+                                            onClick={isEditing ? handleSaveManualEdit : startEditing}
                                             disabled={processingId === selectedContent.id}
-                                            variant="outline"
+                                            variant={isEditing ? "default" : "outline"}
                                             size="sm"
+                                            className={cn(isEditing && "bg-blue-600 hover:bg-blue-700 text-white")}
                                         >
-                                            <RefreshCw className="h-4 w-4 mr-2" />
-                                            Re-extrair
+                                            {processingId === selectedContent.id ? (
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            ) : isEditing ? (
+                                                <Save className="h-4 w-4 mr-2" />
+                                            ) : (
+                                                <Pencil className="h-4 w-4 mr-2" />
+                                            )}
+                                            {isEditing ? "Salvar" : "Editar"}
                                         </Button>
+
+                                        {isEditing && (
+                                            <Button
+                                                onClick={cancelEditing}
+                                                disabled={processingId === selectedContent.id}
+                                                variant="ghost"
+                                                size="sm"
+                                            >
+                                                <X className="h-4 w-4 mr-2" />
+                                                Cancelar
+                                            </Button>
+                                        )}
+
+                                        {!isEditing && (
+                                            <Button
+                                                onClick={() =>
+                                                    handleReExtract(
+                                                        selectedContent.id,
+                                                        selectedContent.alert_id,
+                                                        selectedContent.alerts.clean_url || selectedContent.alerts.url
+                                                    )
+                                                }
+                                                disabled={processingId === selectedContent.id}
+                                                variant="outline"
+                                                size="sm"
+                                            >
+                                                <RefreshCw className="h-4 w-4 mr-2" />
+                                                Re-extrair
+                                            </Button>
+                                        )}
                                     </div>
                                 </CardHeader>
                                 <Separator />
                                 <ScrollArea className="flex-1 w-full h-full">
                                     <CardContent className="p-6 lg:p-8">
-                                        <div className="prose prose-sm sm:prose-base max-w-none dark:prose-invert prose-img:rounded-lg prose-img:shadow-md prose-headings:text-primary prose-a:text-blue-500">
-                                            <ReactMarkdown
-                                                components={{
-                                                    img: ({ node, ...props }) => (
-                                                        <img
-                                                            {...props}
-                                                            className="rounded-lg shadow-md max-w-full h-auto mx-auto object-cover max-h-[500px]"
-                                                            loading="lazy"
-                                                            onError={(e) => {
-                                                                const target = e.target as HTMLImageElement;
-                                                                target.style.display = 'none';
-                                                            }}
-                                                        />
-                                                    ),
-                                                }}
-                                            >
-                                                {selectedContent.cleaned_content || selectedContent.markdown_content}
-                                            </ReactMarkdown>
-                                        </div>
+                                        {isEditing ? (
+                                            <div className="space-y-4">
+                                                <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                                                    Editor Manual:
+                                                </label>
+                                                <Textarea
+                                                    value={editContent}
+                                                    onChange={(e) => setEditContent(e.target.value)}
+                                                    className="min-h-[500px] font-mono text-sm leading-relaxed"
+                                                    placeholder="Cole ou edite o texto do artigo aqui..."
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="prose prose-sm sm:prose-base max-w-none dark:prose-invert prose-img:rounded-lg prose-img:shadow-md prose-headings:text-primary prose-a:text-blue-500">
+                                                <ReactMarkdown
+                                                    components={{
+                                                        img: ({ node, ...props }) => (
+                                                            <img
+                                                                {...props}
+                                                                className="rounded-lg shadow-md max-w-full h-auto mx-auto object-cover max-h-[500px]"
+                                                                loading="lazy"
+                                                                onError={(e) => {
+                                                                    const target = e.target as HTMLImageElement;
+                                                                    target.style.display = 'none';
+                                                                }}
+                                                            />
+                                                        ),
+                                                    }}
+                                                >
+                                                    {selectedContent.cleaned_content || selectedContent.markdown_content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </ScrollArea>
                             </>

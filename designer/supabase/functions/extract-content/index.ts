@@ -13,6 +13,31 @@ const corsHeaders = {
 };
 
 /**
+ * Checks if a URL looks like a valid article URL (not an image, asset, or Google resource)
+ */
+function isValidArticleUrl(url: string): boolean {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+
+    // Reject Google and common CDN/asset domains
+    const blockedDomains = [
+        'google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com',
+        'googletagmanager.com', 'w3.org', 'schema.org', 'facebook.com/sharer',
+        'twitter.com/intent', 'linkedin.com/shareArticle'
+    ];
+    if (blockedDomains.some(d => lower.includes(d))) return false;
+
+    // Reject common asset file extensions
+    const assetExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.css', '.js', '.woff', '.woff2', '.ttf', '.eot'];
+    if (assetExtensions.some(ext => lower.endsWith(ext) || lower.includes(ext + '?'))) return false;
+
+    // Reject data URIs
+    if (lower.startsWith('data:')) return false;
+
+    return true;
+}
+
+/**
  * Cleans and resolves Google URLs to get the real article URL
  * Handles Google News RSS URLs, google.com/url redirects, regex search, and Base64 decoding
  */
@@ -106,22 +131,32 @@ async function resolveGoogleNewsUrl(url: string): Promise<string> {
                 return matchLocation[1].replace(/\\x3d/g, '=').replace(/\\x26/g, '&');
             }
 
-            // Strategy: Link in pure HTML
+            // Strategy: Link in pure HTML - prioritize article-like links
             const $ = cheerio.load(html);
-            const link = $('a[href^="http"]:not([href*="google.com"]):not([href*="googleusercontent.com"])').first().attr('href');
-            if (link) return link;
 
-            // Strategy: Regex for any external URL
+            // Look for canonical or og:url meta tags first (most reliable)
+            const canonical = $('link[rel="canonical"]').attr('href');
+            if (canonical && !canonical.includes('google.com')) {
+                console.log(`   ✓ Found canonical URL: ${canonical}`);
+                return canonical;
+            }
+            const ogUrl = $('meta[property="og:url"]').attr('content');
+            if (ogUrl && !ogUrl.includes('google.com')) {
+                console.log(`   ✓ Found og:url: ${ogUrl}`);
+                return ogUrl;
+            }
+
+            // Look for external links, excluding assets
+            const link = $('a[href^="http"]:not([href*="google.com"]):not([href*="googleusercontent.com"])').first().attr('href');
+            if (link && isValidArticleUrl(link)) return link;
+
+            // Strategy: Regex for any external URL (with stricter filtering)
             const allUrls = html.match(/https?:\/\/[^\s"'<>]+/g) || [];
-            const externalUrl = allUrls.find(u =>
-                !u.includes('google.com') &&
-                !u.includes('gstatic.com') &&
-                !u.includes('googleapis.com') &&
-                !u.includes('googletagmanager.com') &&
-                !u.includes('w3.org') &&
-                !u.includes('schema.org')
-            );
-            if (externalUrl) return externalUrl;
+            const externalUrl = allUrls.find(u => isValidArticleUrl(u));
+            if (externalUrl) {
+                console.log(`   ✓ Found external URL via regex: ${externalUrl}`);
+                return externalUrl;
+            }
 
         } catch (e: any) {
             console.log(`   ⚠️ Network resolution failed: ${e.message}`);
@@ -142,15 +177,23 @@ async function resolveGoogleNewsUrl(url: string): Promise<string> {
 /**
  * Fetches content from URL using Jina Reader API (primary)
  */
-async function fetchContentAsMarkdown(url: string): Promise<{ markdown: string; wordCount: number, source: string }> {
+async function fetchContentAsMarkdown(url: string): Promise<{
+    markdown: string;
+    wordCount: number;
+    source: string;
+    title?: string;
+    publishedTime?: string;
+    siteName?: string;
+}> {
     const jinaUrl = `https://r.jina.ai/${url}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for Jina
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout for Jina
 
     try {
+        console.log(`   🌐 Fetching from Jina Reader (JSON mode)...`);
         const response = await fetch(jinaUrl, {
             headers: {
-                "Accept": "text/markdown",
+                "Accept": "application/json",
                 "User-Agent": "Mozilla/5.0 (compatible; ContentExtractor/1.0)",
             },
             signal: controller.signal
@@ -161,17 +204,50 @@ async function fetchContentAsMarkdown(url: string): Promise<{ markdown: string; 
             throw new Error(`Jina status: ${response.status}`);
         }
 
-        const markdown = await response.text();
-        const wordCount = markdown.split(/\s+/).filter(w => w.length > 0).length;
+        const data = await response.json();
+        const markdown = data.content || "";
+        const wordCount = markdown.split(/\s+/).filter((w: string) => w.length > 0).length;
 
-        if (markdown.includes("Cloudflare") || markdown.length < 50) {
-            throw new Error("Jina returned invalid content");
+        return {
+            markdown,
+            wordCount,
+            source: 'jina-json',
+            title: data.title,
+            publishedTime: data.publishedTime,
+            siteName: data.siteName
+        };
+
+    } catch (e: any) {
+        console.warn(`   ⚠️ Jina JSON fetch failed or timed out: ${e.message}. Falling back to text mode.`);
+
+        // Fallback to text mode if JSON fails
+        const textController = new AbortController(); // Use a new controller for the fallback fetch
+        const textTimeoutId = setTimeout(() => textController.abort(), 15000); // 15s timeout for text mode
+        try {
+            const response = await fetch(jinaUrl, {
+                headers: {
+                    "Accept": "text/markdown",
+                    "User-Agent": "Mozilla/5.0 (compatible; ContentExtractor/1.0)",
+                },
+                signal: textController.signal
+            });
+            clearTimeout(textTimeoutId);
+
+            if (!response.ok) throw new Error(`Jina text status: ${response.status}`);
+
+            const markdown = await response.text();
+            const wordCount = markdown.split(/\s+/).filter(w => w.length > 0).length;
+
+            // Try to extract title from first line of markdown
+            const h1Match = markdown.match(/^#\s+(.+)$/m);
+            const title = h1Match ? h1Match[1].trim() : undefined;
+
+            return { markdown, wordCount, source: 'jina-text', title };
+        } catch (innerE: any) {
+            console.error(`   ❌ All Jina attempts failed: ${innerE.message}`);
+            // Re-throw the error to be caught by the main handler, which will then call fallbackExtraction
+            throw innerE;
         }
-
-        return { markdown, wordCount, source: 'jina' };
-    } catch (error) {
-        console.log("Jina Reader failed, trying fallback...", error);
-        return await fallbackExtraction(url);
     }
 }
 
@@ -395,19 +471,78 @@ Deno.serve(async (req: Request) => {
 
         // 2. Extract content
         console.log(`\n📰 STEP 3: Extracting content from URL...`);
-        const { markdown, wordCount, source } = await fetchContentAsMarkdown(urlToExtract);
+        let extractionResult: any;
+        let extractionError = null;
+
+        try {
+            extractionResult = await fetchContentAsMarkdown(urlToExtract);
+
+            // Validate content quality/presence
+            if (!extractionResult.markdown || extractionResult.markdown.trim().length < 50 ||
+                extractionResult.markdown.toLowerCase().includes("google news") && extractionResult.markdown.length < 200) {
+                throw new Error("Extracted content is too short or appears to be a placeholder (Google News).");
+            }
+        } catch (primaryError: any) {
+            console.warn(`⚠️ Primary extraction (Jina) failed: ${primaryError.message}. Trying Cheerio fallback...`);
+
+            // Try Cheerio fallback
+            try {
+                extractionResult = await fallbackExtraction(urlToExtract);
+                console.log(`✅ Cheerio fallback succeeded! Words: ${extractionResult.wordCount}`);
+
+                // Validate fallback content
+                if (!extractionResult.markdown || extractionResult.wordCount < 50) {
+                    throw new Error("Fallback extraction returned insufficient content.");
+                }
+            } catch (fallbackError: any) {
+                console.error(`❌ Both extraction methods failed.`);
+                extractionError = `Primary (Jina): ${primaryError.message} | Fallback (Cheerio): ${fallbackError.message}`;
+            }
+        }
+
+        if (extractionError) {
+            // Log failure to database
+            await supabase
+                .from("extracted_content")
+                .upsert({
+                    alert_id,
+                    extraction_status: 'failed',
+                    error_message: extractionError,
+                    extracted_at: new Date().toISOString()
+                }, { onConflict: 'alert_id' });
+
+            // Optional: Don't update alert status to 'extracted' so it can be retried
+
+            return new Response(
+                JSON.stringify({
+                    success: false,
+                    error: extractionError,
+                    message: "Content extraction failed and was logged."
+                }),
+                { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
+
+        const { markdown, wordCount, source, title: extractedTitle, publishedTime, siteName } = extractionResult;
 
         // Clean content
         const cleanedContent = cleanMarkdownContent(markdown);
 
-        // 3. Translation Step (if OpenRouter available)
+        // 3. Metadata refinement
         let finalTitle = alert?.title || "";
+
+        // If current title is placeholder, use extracted one
+        if (!finalTitle || finalTitle === "Extraindo..." || finalTitle === "Novo Alerta") {
+            finalTitle = extractedTitle || finalTitle;
+        }
+
+        // 4. Translation Step (if OpenRouter available)
         let finalContent = cleanedContent;
 
         if (openRouterKey && translate) {
             console.log(`\n🌍 STEP 4: Translating content (requested)...`);
             // Translate title
-            if (finalTitle) {
+            if (finalTitle && finalTitle !== "Extraindo...") {
                 finalTitle = await translateText(finalTitle, "Title", openRouterKey);
             }
             // Translate content
@@ -421,9 +556,9 @@ Deno.serve(async (req: Request) => {
         const cleanedWordCount = finalContent.split(/\s+/).filter(w => w.length > 0).length;
         const qualityScore = calculateQualityScore(finalContent, cleanedWordCount);
 
-        console.log(`✅ Extraction & Translation complete! Score: ${qualityScore}`);
+        console.log(`✅ Extraction complete! Score: ${qualityScore} | Title: ${finalTitle}`);
 
-        // 3. Upsert extracted content
+        // 5. Upsert extracted content
         const { error: insertError } = await supabase
             .from("extracted_content")
             .upsert({
@@ -433,19 +568,32 @@ Deno.serve(async (req: Request) => {
                 word_count: cleanedWordCount,
                 quality_score: qualityScore,
                 extraction_status: 'success',
+                error_message: null, // Clear any previous error
                 extracted_at: new Date().toISOString()
             }, { onConflict: 'alert_id' });
 
         if (insertError) throw insertError;
 
-        // 4. Update alert status
+        // 6. Update alert status and metadata
+        const updateData: any = {
+            status: "extracted",
+            clean_url: urlToExtract,
+            title: finalTitle
+        };
+
+        // Update publisher if found and not already set
+        if (siteName && (!alert?.publisher || alert.publisher === "Manual")) {
+            updateData.publisher = siteName;
+        }
+
+        // Update publication date if found
+        if (publishedTime) {
+            updateData.email_date = publishedTime;
+        }
+
         await supabase
             .from("alerts")
-            .update({
-                status: "extracted",
-                clean_url: urlToExtract,
-                title: finalTitle // Update title with translation if any
-            })
+            .update(updateData)
             .eq("id", alert_id);
 
         return new Response(
@@ -463,7 +611,7 @@ Deno.serve(async (req: Request) => {
     } catch (error: any) {
         let message = String(error);
         if (error instanceof Error) message = error.message;
-        console.error(`❌ Extraction Failed: ${message}`);
+        console.error(`❌ Unexpected Error: ${message}`);
 
         return new Response(
             JSON.stringify({ error: message }),

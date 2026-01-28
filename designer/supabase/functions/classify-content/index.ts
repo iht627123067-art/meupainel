@@ -201,9 +201,21 @@ Deno.serve(async (req: Request) => {
         // 1. Get the extracted content and the original alert
         const { data: extracted } = await supabase
             .from("extracted_content")
-            .select("cleaned_content, markdown_content")
+            .select("cleaned_content, markdown_content, extraction_status, error_message")
             .eq("alert_id", alert_id)
             .single();
+
+        if (extracted?.extraction_status === 'failed') {
+            console.log(`⚠️ Extraction previously failed for this alert: ${extracted.error_message}. Skipping classification.`);
+            return new Response(
+                JSON.stringify({
+                    success: false,
+                    error: "Extraction failed",
+                    details: extracted.error_message
+                }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+        }
 
         const { data: alert, error: alertError } = await supabase
             .from("alerts")

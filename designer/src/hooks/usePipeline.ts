@@ -17,6 +17,7 @@ import {
     rejectAlert,
     removeAlert,
     retryAlert,
+    saveManualContent,
     moveToStage,
     getNextStage,
     getPrevStage,
@@ -43,8 +44,11 @@ export interface UsePipelineReturn {
     deleteItem: (id: string) => Promise<void>;
     extractContent: (id: string, url: string) => Promise<void>;
     classifyContent: (id: string) => Promise<void>;
+    classifyItem: (id: string, category: string) => Promise<void>;
+    mergeItems: (keepId: string, rejectIds: string[], category?: string) => Promise<void>;
     generateLinkedInPost: (id: string) => Promise<void>;
     retryItem: (id: string, url?: string) => Promise<void>;
+    saveManualContentAction: (id: string, content: string) => Promise<void>;
 
     // Helpers
     getNextStageHelper: (currentStage: StageId) => StageId | null;
@@ -87,7 +91,7 @@ export function usePipeline(): UsePipelineReturn {
                         "published",
                         "needs_review",
                     ],
-                    select: "id, title, description, publisher, status, created_at, url, source_url, clean_url, is_valid, linkedin_posts(id, status, created_at)"
+                    select: "id, title, description, publisher, status, created_at, email_date, url, source_url, clean_url, is_valid, personalization_score, keywords, classification, duplicate_group_id, linkedin_posts(id, status, created_at)"
                 });
                 const grouped = groupAlertsByStatus(alerts);
                 setItems(grouped);
@@ -286,7 +290,126 @@ export function usePipeline(): UsePipelineReturn {
         [toast, fetchItems, items]
     );
 
-    // Helper functions
+    // Save manual content handler
+    const saveManualContentAction = useCallback(
+        async (id: string, content: string) => {
+            setProcessingId(id);
+            try {
+                await saveManualContent(id, content);
+                toast({
+                    title: "Conteúdo salvo com sucesso!",
+                });
+                await fetchItems(true);
+            } catch (error: any) {
+                toast({
+                    title: "Erro ao salvar conteúdo",
+                    description: error.message,
+                    variant: "destructive",
+                });
+            } finally {
+                setProcessingId(null);
+            }
+        },
+        [toast, fetchItems]
+    );
+
+    // Classify item with category (quick classification from Review page)
+    const classifyItem = useCallback(
+        async (id: string, category: string) => {
+            setProcessingId(id);
+            try {
+                // Update classification and move to extracted status
+                const { error } = await supabase
+                    .from("alerts")
+                    .update({
+                        classification: category,
+                        status: category === "irrelevant" ? "rejected" : "extracted"
+                    })
+                    .eq("id", id);
+
+                if (error) throw error;
+
+                toast({
+                    title: category === "irrelevant" ? "Item rejeitado" : "Classificado!",
+                    description: category === "irrelevant"
+                        ? "Item marcado como irrelevante"
+                        : `Categoria: ${category}`,
+                });
+                await fetchItems(true);
+            } catch (error: any) {
+                toast({
+                    title: "Erro ao classificar",
+                    description: error.message,
+                    variant: "destructive",
+                });
+            } finally {
+                setProcessingId(null);
+            }
+        },
+        [toast, fetchItems]
+    );
+
+    // Merge duplicates: Keep one, reject others
+    const mergeItems = useCallback(
+        async (keepId: string, rejectIds: string[], category?: string) => {
+            setProcessingId(keepId);
+            try {
+                // 1. Update the keeper
+                const updateData: any = {
+                    is_duplicate: false,
+                    duplicate_group_id: null // clear group id to unlink from duplicates visually if needed, or keep to track history? 
+                    // Better to keep null so it doesn't show up in clusters anymore? 
+                    // Or keep it? If we keep it, it groups with rejected ones? 
+                    // The view filters by status 'needs_review', so rejected won't show.
+                    // But the master moves to 'extracted'.
+                };
+
+                if (category) {
+                    updateData.classification = category;
+                    updateData.status = category === "irrelevant" ? "rejected" : "extracted";
+                } else {
+                    updateData.status = "extracted";
+                }
+
+                const { error: keepError } = await supabase
+                    .from("alerts")
+                    .update(updateData)
+                    .eq("id", keepId);
+
+                if (keepError) throw keepError;
+
+                // 2. Reject the others
+                if (rejectIds.length > 0) {
+                    const { error: rejectError } = await supabase
+                        .from("alerts")
+                        .update({
+                            status: "rejected",
+                            classification: "duplicate"
+                        })
+                        .in("id", rejectIds);
+
+                    if (rejectError) throw rejectError;
+                }
+
+                toast({
+                    title: "Merge realizado com sucesso",
+                    description: `${rejectIds.length + 1} itens processados.`,
+                });
+
+                await fetchItems(true);
+            } catch (error: any) {
+                toast({
+                    title: "Erro ao mesclar",
+                    description: error.message,
+                    variant: "destructive",
+                });
+            } finally {
+                setProcessingId(null);
+            }
+        },
+        [toast, fetchItems]
+    );
+
     const getNextStageHelper = useCallback((currentStage: StageId): StageId | null => {
         return getNextStage(currentStage);
     }, []);
@@ -322,8 +445,11 @@ export function usePipeline(): UsePipelineReturn {
         deleteItem,
         extractContent,
         classifyContent,
+        classifyItem,
+        mergeItems,
         generateLinkedInPost,
         retryItem,
+        saveManualContentAction,
 
         // Helpers
         getNextStageHelper,

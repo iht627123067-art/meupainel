@@ -29,6 +29,7 @@ export async function fetchAlerts(
     let query = supabase
         .from("alerts")
         .select(selectQuery)
+        .order("personalization_score", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
 
     if (statusFilter && statusFilter.length > 0) {

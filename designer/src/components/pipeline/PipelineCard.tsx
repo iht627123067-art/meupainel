@@ -97,7 +97,7 @@ export const PipelineCard = memo(function PipelineCard({
 
             {/* Footer */}
             <div className="flex items-center justify-between text-xs text-muted-foreground mt-3 pt-3 border-t border-border/30">
-                <span>{new Date(item.created_at).toLocaleDateString("pt-BR")}</span>
+                <span>{new Date(item.email_date || item.created_at).toLocaleDateString("pt-BR")}</span>
 
                 <div className="flex items-center gap-1">
                     {/* External Link */}

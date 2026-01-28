@@ -1,6 +1,7 @@
 import { ExternalLink, CheckCircle, XCircle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -33,6 +34,9 @@ interface AlertsTableProps {
   onReject?: (id: string) => void;
   isLoading?: boolean;
   onRowClick?: (alert: Alert) => void;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
+  onSelectAll?: () => void;
 }
 
 const statusConfig = {
@@ -44,7 +48,7 @@ const statusConfig = {
   published: { label: "Publicado", icon: CheckCircle, className: "bg-primary/20 text-primary" },
 };
 
-export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick }: AlertsTableProps) {
+export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick, selectedIds = new Set(), onToggleSelect, onSelectAll }: AlertsTableProps) {
   if (isLoading) {
     return (
       <div className="glass-card p-8">
@@ -68,6 +72,14 @@ export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick
       <Table>
         <TableHeader>
           <TableRow className="border-border/50 hover:bg-transparent">
+            {onToggleSelect && (
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={selectedIds.size === alerts.length && alerts.length > 0}
+                  onCheckedChange={onSelectAll}
+                />
+              </TableHead>
+            )}
             <TableHead className="w-[40%] min-w-[300px] text-muted-foreground">Título & Descrição</TableHead>
             <TableHead className="text-muted-foreground">Fonte</TableHead>
             <TableHead className="text-muted-foreground">Status</TableHead>
@@ -84,10 +96,21 @@ export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick
             return (
               <TableRow
                 key={alert.id}
-                className="border-border/30 hover:bg-muted/30 animate-fade-in cursor-pointer"
+                className={cn(
+                  "border-border/30 hover:bg-muted/30 animate-fade-in cursor-pointer",
+                  selectedIds.has(alert.id) && "bg-primary/10"
+                )}
                 style={{ animationDelay: `${index * 50}ms` }}
                 onClick={() => onRowClick?.(alert)}
               >
+                {onToggleSelect && (
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedIds.has(alert.id)}
+                      onCheckedChange={() => onToggleSelect(alert.id)}
+                    />
+                  </TableCell>
+                )}
                 <TableCell className="max-w-[400px]">
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-2">

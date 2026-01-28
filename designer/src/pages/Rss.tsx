@@ -31,10 +31,13 @@ import {
     Loader2,
     Download,
     Settings,
+    ClipboardEdit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { cleanUrl } from "@/utils/urlUtils";
+import { BulkActionsBar } from "@/components/shared/BulkActionsBar";
+import { GenerationProgressModal } from "@/components/shared/GenerationProgressModal";
 
 interface RssFeed {
     id: string;
@@ -67,12 +70,13 @@ export default function RssPage() {
     const [activeFeedId, setActiveFeedId] = useState<string | null>(null);
     const [hoursFilter, setHoursFilter] = useState("12");
     const [feedTitle, setFeedTitle] = useState("");
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [progressStage, setProgressStage] = useState<'preparing' | 'generating' | 'saving' | 'complete' | 'error'>('preparing');
+    const [generationError, setGenerationError] = useState<string>();
+    const [importedAlertIds, setImportedAlertIds] = useState<string[]>([]);
     const { toast } = useToast();
     const { user } = useAuth();
-
-    useEffect(() => {
-        fetchFeeds();
-    }, []);
+    const navigate = useNavigate();
 
     const fetchFeeds = async () => {
         setIsLoadingFeeds(true);
@@ -84,16 +88,21 @@ export default function RssPage() {
 
             if (error) throw error;
             setFeeds(data || []);
-        } catch (error: any) {
+        } catch (error) {
             toast({
                 title: "Erro ao carregar feeds",
-                description: error.message,
+                description: error instanceof Error ? error.message : "Erro desconhecido",
                 variant: "destructive",
             });
         } finally {
             setIsLoadingFeeds(false);
         }
     };
+
+    useEffect(() => {
+        fetchFeeds();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const fetchArticles = async (feedId: string) => {
         setIsFetching(true);
@@ -129,10 +138,10 @@ export default function RssPage() {
                         : "Todos são novos!",
                 });
             }
-        } catch (error: any) {
+        } catch (error) {
             toast({
                 title: "Erro ao buscar artigos",
-                description: error.message,
+                description: error instanceof Error ? error.message : "Erro desconhecido",
                 variant: "destructive",
             });
         } finally {
@@ -159,7 +168,7 @@ export default function RssPage() {
         setSelectedArticles(new Set());
     };
 
-    const importSelected = async () => {
+    const importArticles = async (targetStatus: 'pending' | 'needs_review' = 'pending') => {
         if (selectedArticles.size === 0 || !user) return;
 
         setIsImporting(true);
@@ -178,7 +187,7 @@ export default function RssPage() {
                     clean_url: cleaningResult.cleanUrl || null,
                     source_url: article.source_url,
                     publisher: article.publisher,
-                    status: "pending" as const,
+                    status: targetStatus,
                     is_valid: cleaningResult.valid,
                     keywords: [],
                 };
@@ -190,20 +199,28 @@ export default function RssPage() {
 
             if (error) throw error;
 
-            toast({
-                title: `${alertsToInsert.length} artigos importados!`,
-                description: "Veja no Pipeline → Pendentes",
-            });
+            if (targetStatus === 'needs_review') {
+                toast({
+                    title: `${alertsToInsert.length} artigos enviados para revisão!`,
+                    description: "Redirecionando para a página de revisão...",
+                });
+                setTimeout(() => navigate("/review"), 1000);
+            } else {
+                toast({
+                    title: `${alertsToInsert.length} artigos importados!`,
+                    description: "Veja no Pipeline → Pendentes",
+                });
+            }
 
             // Mark imported articles as duplicates
             setArticles(prev => prev.map(a =>
                 selectedArticles.has(a.guid) ? { ...a, is_duplicate: true } : a
             ));
             setSelectedArticles(new Set());
-        } catch (error: any) {
+        } catch (error) {
             toast({
                 title: "Erro ao importar",
-                description: error.message,
+                description: error instanceof Error ? error.message : "Erro desconhecido",
                 variant: "destructive",
             });
         } finally {
@@ -368,7 +385,16 @@ export default function RssPage() {
                                 </Button>
                                 <Button
                                     size="sm"
-                                    onClick={importSelected}
+                                    onClick={() => importArticles('needs_review')}
+                                    disabled={selectedArticles.size === 0 || isImporting}
+                                    className="bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 dark:bg-orange-950/20 dark:border-orange-900/40"
+                                >
+                                    <ClipboardEdit className="h-4 w-4 mr-2" />
+                                    Revisar ({selectedArticles.size})
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    onClick={() => importArticles('pending')}
                                     disabled={selectedArticles.size === 0 || isImporting}
                                 >
                                     {isImporting ? (

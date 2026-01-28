@@ -30,6 +30,11 @@ export interface PipelineItem {
     source_url?: string | null;
     clean_url: string | null;
     is_valid: boolean;
+    email_date?: string | null;
+    personalization_score?: number | null;
+    keywords?: string[] | null;
+    classification?: string | null;
+    duplicate_group_id?: string | null;
     linkedin_posts?: {
         id: string;
         status: string;
