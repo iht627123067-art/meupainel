@@ -1,6 +1,6 @@
 // Supabase Edge Function: fetch-rss (v4)
-// Fetches and parses RSS feeds, filters by time, limits results. 
-// Improved HTML cleaning and Image Extraction.
+// Fetches and parses RSS feeds, filters by loops, limits results. 
+// Uses RPC for efficient fuzzy deduplication.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -57,8 +57,6 @@ function decodeHtmlEntities(text: string): string {
 }
 
 function extractImageFromHtml(html: string): string | null {
-    // Try to find img src
-    // Matches <img ... src="URL" ... > or <img ... src='URL' ... >
     const imgMatch = html.match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i);
     if (imgMatch) return imgMatch[1];
     return null;
@@ -66,18 +64,10 @@ function extractImageFromHtml(html: string): string | null {
 
 function cleanHtml(html: string | null): string | null {
     if (!html) return null;
-
-    // 1. Decode entities first to ensure tags are recognized e.g &lt;b&gt; -> <b>
     let text = decodeHtmlEntities(html);
-
-    // 2. Remove script and style tags and their content
     text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gim, "");
     text = text.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gim, "");
-
-    // 3. Remove all HTML tags
-    text = text.replace(/<[^>]+>/g, " "); // Replace with space to avoid merging words
-
-    // 4. Remove multiple spaces and trim
+    text = text.replace(/<[^>]+>/g, " ");
     return text.replace(/\s+/g, " ").trim();
 }
 
@@ -97,7 +87,6 @@ function parseRssXml(xml: string): RssArticle[] {
         const sourceUrlMatch = itemXml.match(/<source[^>]+url=["']([^"']+)["']/i);
         const guidMatch = itemXml.match(/<guid[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/guid>/i);
 
-        // Extract Categories
         const categories: string[] = [];
         const catRegex = /<category>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/category>/gi;
         let catMatch;
@@ -105,41 +94,32 @@ function parseRssXml(xml: string): RssArticle[] {
             if (catMatch[1]) categories.push(cleanHtml(catMatch[1]) || "");
         }
 
-        // Extract Image
         let imageUrl: string | null = null;
-
-        // 1. media:content
         const mediaMatch = itemXml.match(/<media:content[^>]+url=["']([^"']+)["']/i);
         if (mediaMatch) imageUrl = mediaMatch[1];
-
-        // 2. enclosure
         if (!imageUrl) {
             const enclosureMatch = itemXml.match(/<enclosure[^>]+url=["']([^"']+)["'][^>]*type=["']image\/[^"']+["']/i);
             if (enclosureMatch) imageUrl = enclosureMatch[1];
         }
-
-        // 3. image from description (RAW description before cleaning)
         if (!imageUrl && descMatch?.[1]) {
-            // Decode entities inside description first because Google News often does: &lt;img src="..."&gt;
             const rawDesc = decodeHtmlEntities(descMatch[1]);
             imageUrl = extractImageFromHtml(rawDesc);
         }
-
-        // Fallback: Google News Specific - sometimes image is in <google-news:image> (rare) or just description
-
-        // Fix Google News Images (often low res in preview, but better than nothing)
         if (imageUrl && imageUrl.startsWith("//")) {
             imageUrl = "https:" + imageUrl;
         }
 
-        const title = titleMatch?.[1] ? cleanHtml(titleMatch[1]) : null;
+        const rawTitle = titleMatch?.[1] ? cleanHtml(titleMatch[1]) : null;
+        // Clean Title Strategy (Source Removal)
+        const title = rawTitle ? rawTitle.replace(/ [\-\|] [^\-\|]+$/, "").trim() : null;
+
         const link = linkMatch?.[1]?.trim();
 
         if (!title || !link) continue;
 
         articles.push({
             title: title,
-            description: descMatch?.[1] ? cleanHtml(descMatch[1]) : null, // Clean description for display
+            description: descMatch?.[1] ? cleanHtml(descMatch[1]) : null,
             url: link,
             source_url: sourceUrlMatch?.[1]?.trim() || null,
             publisher: sourceMatch?.[1]?.trim() || extractDomain(link),
@@ -153,25 +133,11 @@ function parseRssXml(xml: string): RssArticle[] {
     return articles;
 }
 
-async function checkDuplicates(
-    supabase: any,
-    userId: string,
-    urls: string[]
-): Promise<Set<string>> {
-    const { data } = await supabase
-        .from("alerts")
-        .select("url, clean_url")
-        .eq("user_id", userId)
-        .in("url", urls);
-
-    const existingUrls = new Set<string>();
-    if (data) {
-        data.forEach((row: any) => {
-            if (row.url) existingUrls.add(row.url);
-            if (row.clean_url) existingUrls.add(row.clean_url);
-        });
-    }
-    return existingUrls;
+const cleanInput = (str: string): string => {
+    return str.split("?")[0].split("#")[0]
+        .replace(/^(https?:\/\/)?(www\.)?/, "")
+        .replace(/\/$/, "")
+        .toLowerCase();
 }
 
 Deno.serve(async (req: Request) => {
@@ -223,15 +189,38 @@ Deno.serve(async (req: Request) => {
 
         articles = articles.slice(0, 50);
 
-        let existingUrls = new Set<string>();
-        if (check_duplicates && user_id) {
-            existingUrls = await checkDuplicates(supabase, user_id, articles.map((a) => a.url));
+        let duplicatesIds = new Set<string>();
+
+        if (check_duplicates && articles.length > 0) {
+            const articlesPayload = articles.map(a => ({
+                clean_url: cleanInput(a.url),
+                title: a.title
+            }));
+
+            const { data: duplicateData, error: dupError } = await supabase.rpc('check_existing_articles', {
+                p_entries: articlesPayload
+            });
+
+            if (dupError) {
+                console.error("Duplicate RPC Error:", dupError);
+                // Fallback or just ignore error and return without duplicate info?
+                // Or throw? Let's log and proceed, assuming no duplicates if check failed.
+            }
+
+            if (!dupError && duplicateData) {
+                duplicateData.forEach((d: any) => {
+                    if (d.match_url) duplicatesIds.add(d.match_url);
+                });
+            }
         }
 
-        const articlesWithDuplicates = articles.map((article) => ({
-            ...article,
-            is_duplicate: existingUrls.has(article.url),
-        }));
+        const articlesWithDuplicates = articles.map((article) => {
+            const cUrl = cleanInput(article.url);
+            return {
+                ...article,
+                is_duplicate: duplicatesIds.has(cUrl),
+            };
+        });
 
         await supabase
             .from("rss_feeds")

@@ -19,12 +19,15 @@ export interface UseAlertsReturn {
     isExtracting: boolean;
     filteredAlerts: Alert[];
     statusCounts: Record<string, number>;
+    totalCount: number;
+    hasMore: boolean;
 
     // Actions
     setSearchTerm: (term: string) => void;
     setSelectedAlert: (alert: Alert | null) => void;
     toggleStatusFilter: (status: AlertStatus) => void;
-    fetchAlerts: () => Promise<void>;
+    fetchAlerts: (refresh?: boolean) => Promise<void>;
+    loadMore: () => Promise<void>;
     handleApprove: (id: string) => Promise<void>;
     handleReject: (id: string) => Promise<void>;
     handleExtract: (id: string) => Promise<void>;
@@ -41,18 +44,39 @@ export function useAlerts(): UseAlertsReturn {
     const [statusFilter, setStatusFilter] = useState<AlertStatus[]>([]);
     const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
     const [isExtracting, setIsExtracting] = useState(false);
+
+    // Pagination state
+    const [page, setPage] = useState(1);
+    const [totalCount, setTotalCount] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
+    const ITEMS_PER_PAGE = 50;
+
     const { toast } = useToast();
 
     // Memoized fetch function
-    const fetchAlerts = useCallback(async () => {
-        setIsLoading(true);
+    const fetchAlerts = useCallback(async (refresh = false) => {
+        setIsLoading(refresh); // Only show full loading on refresh, background load for pagination
         try {
-            const data = await fetchAlertsService({
+            const currentPage = refresh ? 1 : page;
+            const { data, count } = await fetchAlertsService({
                 sourceType: "gmail_alert",
+                page: currentPage,
+                limit: ITEMS_PER_PAGE,
                 // Select only necessary fields for the list view to save bandwidth
-                select: "id, title, description, publisher, status, created_at, url, clean_url, is_valid"
+                select: "id, title, description, publisher, status, created_at, url, clean_url, is_valid, duplicate_group_id, personalization_score, email_date"
             });
-            setAlerts(data as Alert[]);
+
+            if (refresh) {
+                setAlerts(data as Alert[]);
+                setPage(2);
+            } else {
+                setAlerts(prev => [...prev, ...data as Alert[]]);
+                setPage(prev => prev + 1);
+            }
+
+            setTotalCount(count || 0);
+            setHasMore(data.length === ITEMS_PER_PAGE);
+
         } catch (error: any) {
             toast({
                 title: TOAST_MESSAGES.ERROR_LOAD_ALERTS,
@@ -62,12 +86,17 @@ export function useAlerts(): UseAlertsReturn {
         } finally {
             setIsLoading(false);
         }
-    }, [toast]);
+    }, [toast, page]);
+
+    const loadMore = useCallback(async () => {
+        if (!hasMore || isLoading) return;
+        await fetchAlerts(false);
+    }, [hasMore, isLoading, fetchAlerts]);
 
     // Fetch alerts on mount
     useEffect(() => {
-        fetchAlerts();
-    }, [fetchAlerts]);
+        fetchAlerts(true);
+    }, []);
 
     // Memoized approve handler
     const handleApprove = useCallback(
@@ -76,7 +105,9 @@ export function useAlerts(): UseAlertsReturn {
                 await updateAlertStatus(id, "approved");
 
                 toast({ title: TOAST_MESSAGES.ALERT_APPROVED });
-                await fetchAlerts();
+                // We don't want to re-fetch EVERYTHING on a single action as it might reset scroll
+                // Optimistic update locally
+                setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'approved' } : a));
                 setSelectedAlert(null);
             } catch (error: any) {
                 toast({
@@ -84,6 +115,8 @@ export function useAlerts(): UseAlertsReturn {
                     description: error.message,
                     variant: "destructive",
                 });
+                // Revert on error or fetch
+                await fetchAlerts(true);
             }
         },
         [toast, fetchAlerts]
@@ -96,7 +129,8 @@ export function useAlerts(): UseAlertsReturn {
                 await updateAlertStatus(id, "rejected");
 
                 toast({ title: TOAST_MESSAGES.ALERT_REJECTED });
-                await fetchAlerts();
+                // Optimistic update
+                setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: 'rejected' } : a));
                 setSelectedAlert(null);
             } catch (error: any) {
                 toast({
@@ -104,6 +138,7 @@ export function useAlerts(): UseAlertsReturn {
                     description: error.message,
                     variant: "destructive",
                 });
+                await fetchAlerts(true);
             }
         },
         [toast, fetchAlerts]
@@ -149,7 +184,9 @@ export function useAlerts(): UseAlertsReturn {
                     )}%`,
                 });
 
-                await fetchAlerts();
+                // Optimistic update isn't enough here as we might want updated fields
+                // But full refresh is heavy. Let's fetch just this item or refresh
+                await fetchAlerts(true);
                 setSelectedAlert(null);
             } catch (error: any) {
                 toast({
@@ -194,6 +231,12 @@ export function useAlerts(): UseAlertsReturn {
     }, []);
 
     // Memoized filtered alerts
+    // Client-side filtering applies to "loaded" alerts. 
+    // Ideally filtering should happen on backend if dataset is large, 
+    // but for now combining pagination + client filter is tricky.
+    // If backend pagination is used, client filtering only filters CURRENT PAGE(s).
+    // This is a common tradeoff. For full search, we should push search to backend.
+    // Given the task, we'll keep client filtering on loaded items for now.
     const filteredAlerts = useMemo(() => {
         return alerts.filter((alert) => {
             const matchesSearch =
@@ -226,12 +269,15 @@ export function useAlerts(): UseAlertsReturn {
         isExtracting,
         filteredAlerts,
         statusCounts,
+        totalCount,
+        hasMore,
 
         // Actions
         setSearchTerm,
-        setSelectedAlert: selectAlert, // Override setSelectedAlert with our enhanced version
+        setSelectedAlert: selectAlert,
         toggleStatusFilter,
         fetchAlerts,
+        loadMore,
         handleApprove,
         handleReject,
         handleExtract,

@@ -20,6 +20,7 @@ import {
     Save,
     Pencil,
     X,
+    FileEdit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -149,6 +150,34 @@ export default function Content() {
         } catch (error: any) {
             toast({
                 title: "Erro ao rejeitar",
+                description: error.message,
+                variant: "destructive",
+            });
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleSendToReview = async (contentId: string, alertId: string) => {
+        try {
+            setProcessingId(contentId);
+
+            const { error } = await supabase
+                .from("alerts")
+                .update({ status: "needs_review" })
+                .eq("id", alertId);
+
+            if (error) throw error;
+
+            toast({
+                title: "Enviado para revisão manual",
+                description: "O item foi movido para a aba de revisão onde você pode editar título, publisher e data",
+            });
+
+            fetchContents();
+        } catch (error: any) {
+            toast({
+                title: "Erro ao enviar para revisão",
                 description: error.message,
                 variant: "destructive",
             });
@@ -454,6 +483,19 @@ export default function Content() {
                                             >
                                                 <RefreshCw className="h-4 w-4 mr-2" />
                                                 Re-extrair
+                                            </Button>
+                                        )}
+
+                                        {!isEditing && (
+                                            <Button
+                                                onClick={() => handleSendToReview(selectedContent.id, selectedContent.alert_id)}
+                                                disabled={processingId === selectedContent.id}
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-amber-300 hover:bg-amber-50"
+                                            >
+                                                <FileEdit className="h-4 w-4 mr-2" />
+                                                Revisão Manual
                                             </Button>
                                         )}
                                     </div>

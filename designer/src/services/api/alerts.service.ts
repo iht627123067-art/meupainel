@@ -9,10 +9,15 @@ import type { Alert, AlertStatus, PipelineItem } from "@/types";
 /**
  * Fetch all alerts with optional status filter
  */
+// Match database enum
+export type AlertSourceType = 'gmail_alert' | 'rss';
+
 export interface FetchAlertsOptions {
     statusFilter?: AlertStatus[];
-    sourceType?: 'gmail_alert' | 'linkedin_post' | 'web_article';
+    sourceType?: AlertSourceType;
     select?: string;
+    page?: number;
+    limit?: number;
 }
 
 /**
@@ -20,30 +25,38 @@ export interface FetchAlertsOptions {
  */
 export async function fetchAlerts(
     options: FetchAlertsOptions = {}
-): Promise<any[]> {
-    const { statusFilter, sourceType, select } = options;
+): Promise<{ data: any[]; count: number | null }> {
+    const { statusFilter, sourceType, select, page = 1, limit = 50 } = options;
 
     // Default selection if not specified (optimized for list view)
     const selectQuery = select || "*";
 
     let query = supabase
         .from("alerts")
-        .select(selectQuery)
+        .select(selectQuery, { count: 'estimated' })
         .order("personalization_score", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
+
+    // Apply specific source filter if valid
+    if (sourceType) {
+        query = query.eq("source_type", sourceType);
+    }
+
+    // Apply limit only if positive, otherwise fetch all (careful with large datasets)
+    if (limit > 0) {
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+        query = query.range(from, to);
+    }
 
     if (statusFilter && statusFilter.length > 0) {
         query = query.in("status", statusFilter);
     }
 
-    if (sourceType) {
-        query = query.eq("source_type", sourceType);
-    }
-
-    const { data, error } = await query;
+    const { data, error, count } = await query;
 
     if (error) throw error;
-    return data || [];
+    return { data: data || [], count };
 }
 
 /**

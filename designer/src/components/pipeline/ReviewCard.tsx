@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { PipelineItem } from "@/types";
 import { supabase } from "@/integrations/supabase/client";
-import { cn } from "@/lib/utils";
+import { cn, cleanUrl, getDisplayUrl } from "@/lib/utils";
 
 interface ReviewCardProps {
     item: PipelineItem;
@@ -56,6 +56,7 @@ export function ReviewCard({
 }: ReviewCardProps) {
     const [isEditingMetadata, setIsEditingMetadata] = useState(false);
     const [editUrl, setEditUrl] = useState(item.url);
+    const [editTitle, setEditTitle] = useState(item.title);
     const [editDate, setEditDate] = useState<string | null>(item.email_date || item.created_at);
     const [isExpanded, setIsExpanded] = useState(false);
     const [manualContent, setManualContent] = useState("");
@@ -103,9 +104,29 @@ export function ReviewCard({
 
     const handleSaveMetadata = async () => {
         try {
-            const updatePayload: any = { url: editUrl, clean_url: editUrl };
+            let finalUrl = editUrl;
+            // Auto-fix relative Forbes URLs seen in user feedback
+            if (editUrl.startsWith('/') && item.publisher?.toLowerCase().includes('forbes')) {
+                finalUrl = `https://www.forbes.com${editUrl}`;
+            } else if (editUrl.startsWith('/') && !editUrl.includes('://')) {
+                // If it's a relative path and we don't know the domain, this will likely fail
+                // but at least we don't crash the UI.
+                console.warn("Relative URL detected without clear domain context");
+            }
+
+            // Clean the URL to remove aggregators and tracking params
+            const cleanedUrl = cleanUrl(finalUrl);
+            const updatePayload: any = {
+                url: finalUrl,
+                clean_url: cleanedUrl,
+                title: editTitle
+            };
+
             if (editDate) {
-                updatePayload.email_date = new Date(editDate).toISOString();
+                const parsedDate = new Date(editDate);
+                if (!isNaN(parsedDate.getTime())) {
+                    updatePayload.email_date = parsedDate.toISOString();
+                }
             }
 
             const { error } = await supabase
@@ -116,24 +137,41 @@ export function ReviewCard({
             if (error) throw error;
 
             setIsEditingMetadata(false);
-            await onRetry(item.id, editUrl);
+            await onRetry(item.id, cleanedUrl);
         } catch (error) {
             console.error("Error updating metadata:", error);
+            // Optionally add a toast here if available in props
         }
     };
+
+    // Calculate cleaned URL preview
+    const cleanedUrlPreview = cleanUrl(editUrl);
+    const isUrlModified = cleanedUrlPreview !== editUrl;
+
+    // SAFE DATE CALCULATION to prevent white screen crashes
+    const safeDisplayDate = (() => {
+        try {
+            const rawDate = item.email_date || item.created_at;
+            if (!rawDate) return "Data N/A";
+            const d = new Date(rawDate);
+            return isNaN(d.getTime()) ? "Data Inválida" : d.toLocaleDateString();
+        } catch {
+            return "Erro na data";
+        }
+    })();
 
     return (
         <Card className="border-l-4 border-l-orange-500 overflow-hidden">
             <CardHeader className="pb-3">
                 <div className="flex justify-between items-start">
                     <div className="space-y-1 pr-4">
-                        <CardTitle className="text-lg leading-tight">{item.title}</CardTitle>
+                        <CardTitle className="text-lg leading-tight">{item.title || "Sem Título"}</CardTitle>
                         <CardDescription>
-                            {item.publisher} • {new Date(item.email_date || item.created_at).toLocaleDateString()}
+                            {item.publisher || "Fonte desconhecida"} • {safeDisplayDate}
                         </CardDescription>
                     </div>
                     <Badge variant="outline" className="text-orange-500 border-orange-200 bg-orange-50 shrink-0">
-                        Needs Review
+                        Necessita de Revisão
                     </Badge>
                 </div>
             </CardHeader>
@@ -143,7 +181,7 @@ export function ReviewCard({
                     {/* Score Indicator */}
                     {item.personalization_score != null && (
                         <div className="flex items-center gap-2">
-                            <span className="text-[10px] uppercase text-muted-foreground font-semibold">Score:</span>
+                            <span className="text-[10px] uppercase text-muted-foreground font-semibold">Pontuação:</span>
                             <div className="flex items-center gap-1">
                                 <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
                                     <div
@@ -158,7 +196,7 @@ export function ReviewCard({
                                 <span className={cn(
                                     "text-xs font-bold",
                                     item.personalization_score >= 7 ? "text-green-600" :
-                                        item.personalization_score >= 4 ? "text-yellow-600" : "text-gray-500"
+                                        item.personalization_score >= 4 ? "text-yellow-600" : "text-muted-foreground"
                                 )}>
                                     {item.personalization_score}
                                 </span>
@@ -167,32 +205,29 @@ export function ReviewCard({
                     )}
 
                     {/* Keywords Display */}
-                    {item.keywords && item.keywords.length > 0 && (
-                        <div className="flex flex-wrap gap-1 items-center">
-                            <span className="text-[10px] uppercase text-muted-foreground font-semibold mr-1">Temas:</span>
-                            {item.keywords.map((kw, idx) => (
-                                <Badge key={idx} variant="secondary" className="px-1.5 py-0 text-[10px] font-normal bg-muted/50">
-                                    {kw}
-                                </Badge>
-                            ))}
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase text-muted-foreground font-semibold">Temas:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                            {item.keywords && item.keywords.length > 0 ? (
+                                item.keywords.slice(0, 3).map((kw, idx) => (
+                                    <Badge key={idx} variant="secondary" className="px-1.5 py-0 text-[10px] font-normal bg-muted/50">
+                                        {kw}
+                                    </Badge>
+                                ))
+                            ) : (
+                                <span className="text-[10px] text-muted-foreground italic">Nenhum</span>
+                            )}
                         </div>
-                    )}
-
-                    {/* Current Classification Badge */}
-                    {item.classification && (
-                        <Badge className="text-[10px]">
-                            {CATEGORIES.find(c => c.id === item.classification)?.label || item.classification}
-                        </Badge>
-                    )}
+                    </div>
                 </div>
 
                 {/* Category Quick-Classify Chips */}
                 {onClassify && (
                     <div className="space-y-2">
-                        <label className="text-[10px] uppercase text-muted-foreground font-semibold">
+                        <label className="text-[10px] uppercase text-muted-foreground font-semibold tracking-wider">
                             Classificar como:
                         </label>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2">
                             {CATEGORIES.map((cat) => (
                                 <button
                                     key={cat.id}
@@ -234,19 +269,52 @@ export function ReviewCard({
                         <div className="space-y-3 animate-in fade-in duration-200">
                             <div className="grid gap-3">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] uppercase text-muted-foreground font-medium">URL do Artigo</label>
+                                    <label className="text-[10px] uppercase text-muted-foreground font-medium">Título</label>
+                                    <Input
+                                        value={editTitle}
+                                        onChange={(e) => setEditTitle(e.target.value)}
+                                        className="h-8 text-sm font-medium"
+                                        placeholder="Título da notícia..."
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase text-muted-foreground font-medium">URL Original</label>
                                     <Input
                                         value={editUrl}
                                         onChange={(e) => setEditUrl(e.target.value)}
                                         className="h-8 text-sm"
                                         placeholder="https://..."
                                     />
+                                    {isUrlModified && (
+                                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
+                                            <div className="flex items-start gap-2">
+                                                <div className="flex-shrink-0 mt-0.5">
+                                                    <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[10px] font-semibold text-blue-900 uppercase tracking-wider mb-1">URL será limpa automaticamente:</p>
+                                                    <p className="text-xs text-blue-700 break-all font-mono">{cleanedUrlPreview}</p>
+                                                    <p className="text-[9px] text-blue-600 mt-1 italic">Parâmetros de rastreamento e redirecionamentos removidos</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[10px] uppercase text-muted-foreground font-medium">Data da Notícia</label>
                                     <Input
                                         type="date"
-                                        value={editDate ? new Date(editDate).toISOString().split('T')[0] : ''}
+                                        value={(() => {
+                                            if (!editDate) return '';
+                                            try {
+                                                const d = new Date(editDate);
+                                                return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0];
+                                            } catch {
+                                                return '';
+                                            }
+                                        })()}
                                         onChange={(e) => setEditDate(e.target.value)}
                                         className="h-8 text-sm w-full sm:w-48"
                                     />
@@ -270,10 +338,10 @@ export function ReviewCard({
                                     size="sm"
                                     onClick={handleSaveMetadata}
                                     disabled={isProcessing}
-                                    className="h-8"
+                                    className="h-8 shadow-sm"
                                 >
                                     {isProcessing ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <Save className="h-3 w-3 mr-2" />}
-                                    Salvar & Re-extrair
+                                    Salvar e Re-extrair
                                 </Button>
                             </div>
                         </div>
@@ -282,17 +350,22 @@ export function ReviewCard({
                             <div className="flex items-center gap-2 text-sm text-muted-foreground break-all">
                                 <ExternalLink className="h-3 w-3 shrink-0" />
                                 <a
-                                    href={item.url}
+                                    href={getDisplayUrl(item)}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="hover:text-primary hover:underline line-clamp-1"
                                 >
-                                    {item.url}
+                                    {getDisplayUrl(item)}
                                 </a>
                             </div>
+                            {item.clean_url && item.clean_url !== item.url && (
+                                <div className="flex items-center gap-2 text-[10px] text-muted-foreground/50 italic">
+                                    <span>URL Original (auditoria): {item.url}</span>
+                                </div>
+                            )}
                             <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
                                 <span className="uppercase tracking-wider">Data:</span>
-                                <span>{new Date(item.email_date || item.created_at).toLocaleDateString()}</span>
+                                <span>{safeDisplayDate}</span>
                             </div>
                         </div>
                     )}
@@ -366,7 +439,7 @@ export function ReviewCard({
                 <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => onRetry(item.id, item.url)}
+                    onClick={() => onRetry(item.id, getDisplayUrl(item))}
                     disabled={isProcessing}
                     className="h-8 shadow-sm"
                 >

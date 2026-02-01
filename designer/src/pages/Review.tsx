@@ -7,12 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, AlertTriangle, PlusCircle, Save, X, FileText, Link2, Sparkles, Loader2, XCircle } from "lucide-react";
+import { CheckCircle, AlertTriangle, PlusCircle, Save, X, FileText, Link2, Sparkles, Loader2, XCircle, Search, Filter, BarChart3 } from "lucide-react";
 import { ReviewCard, CATEGORIES } from "@/components/pipeline/ReviewCard";
 import { ClusterReviewCard } from "@/components/pipeline/ClusterReviewCard";
 import { createManualEntry, createAlertAndExtract } from "@/services/api/content.service";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, getDisplayUrl } from "@/lib/utils";
 
 export default function ReviewPage() {
     const {
@@ -34,7 +34,8 @@ export default function ReviewPage() {
         title: "",
         url: "",
         publisher: "",
-        content: ""
+        content: "",
+        date: new Date().toISOString().split('T')[0]
     });
 
     const [searchTerm, setSearchTerm] = useState("");
@@ -45,7 +46,8 @@ export default function ReviewPage() {
     const reviewItems = items.needs_review || [];
 
     const filteredItems = reviewItems.filter(item => {
-        const matchesSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        const title = item.title || "";
+        const matchesSearch = title.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (item.publisher && item.publisher.toLowerCase().includes(searchTerm.toLowerCase()));
         const matchesScore = (item.personalization_score || 0) >= minScore;
         return matchesSearch && matchesScore;
@@ -53,7 +55,14 @@ export default function ReviewPage() {
 
     const displayList = filteredItems.reduce((acc, item) => {
         if (item.duplicate_group_id) {
-            const existingGroup = acc.find(x => x.type === 'cluster' && x.items[0].duplicate_group_id === item.duplicate_group_id) as { type: 'cluster', items: any[] } | undefined;
+            // Safer search for existing clusters
+            const existingGroup = acc.find(x =>
+                x.type === 'cluster' &&
+                x.items &&
+                x.items.length > 0 &&
+                x.items[0].duplicate_group_id === item.duplicate_group_id
+            ) as { type: 'cluster', items: any[] } | undefined;
+
             if (existingGroup) {
                 existingGroup.items.push(item);
             } else {
@@ -102,7 +111,7 @@ export default function ReviewPage() {
         try {
             for (const id of selectedIds) {
                 const item = reviewItems.find(i => i.id === id);
-                if (item) await retryItem(id, item.url);
+                if (item) await retryItem(id, getDisplayUrl(item));
             }
             setSelectedIds([]);
             toast({ title: `${selectedIds.length} extrações iniciadas` });
@@ -153,7 +162,8 @@ export default function ReviewPage() {
                 manualEntry.title,
                 manualEntry.url,
                 manualEntry.publisher || "Manual",
-                manualEntry.content
+                manualEntry.content,
+                manualEntry.date
             );
 
             toast({
@@ -162,7 +172,7 @@ export default function ReviewPage() {
             });
 
             setIsAddingManual(false);
-            setManualEntry({ title: "", url: "", publisher: "", content: "" });
+            setManualEntry({ title: "", url: "", publisher: "", content: "", date: new Date().toISOString().split('T')[0] });
             fetchItems();
         } catch (error) {
             toast({
@@ -210,106 +220,233 @@ export default function ReviewPage() {
 
     return (
         <DashboardLayout>
-            <div className="max-w-4xl mx-auto space-y-6">
-                <div className="flex flex-col gap-1">
+            <div className="max-w-6xl mx-auto space-y-6 px-4 pb-8">
+                {/* Header Section */}
+                <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-                            <AlertTriangle className="h-8 w-8 text-orange-500" />
-                            Revisão Manual
-                        </h1>
+                        <div className="flex items-center gap-3">
+                            <div className="h-12 w-12 rounded-lg bg-orange-100 dark:bg-orange-900/20 flex items-center justify-center">
+                                <AlertTriangle className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+                            </div>
+                            <div>
+                                <h1 className="text-3xl font-bold tracking-tight">
+                                    Revisão Manual
+                                </h1>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    {reviewItems.length > 0 
+                                        ? `${reviewItems.length} ${reviewItems.length === 1 ? 'item' : 'itens'} pendentes de revisão`
+                                        : 'Nenhum item pendente'
+                                    }
+                                </p>
+                            </div>
+                        </div>
                         <Button
                             onClick={() => setIsAddingManual(!isAddingManual)}
                             variant={isAddingManual ? "secondary" : "default"}
+                            size="lg"
+                            className="shadow-sm"
                         >
                             {isAddingManual ? <X className="h-4 w-4 mr-2" /> : <PlusCircle className="h-4 w-4 mr-2" />}
                             {isAddingManual ? "Cancelar" : "Adicionar Notícia"}
                         </Button>
                     </div>
-                    <p className="text-muted-foreground">
-                        Itens que falharam na extração automática ou inserção de novos conteúdos.
-                    </p>
-                </div>
 
-                {/* Filters Row */}
-                <div className="flex flex-col sm:flex-row gap-4 items-end bg-muted/30 p-4 rounded-lg border border-border/50">
-                    <div className="flex-1 space-y-1 w-full">
-                        <label className="text-xs font-semibold uppercase text-muted-foreground">Pesquisar</label>
-                        <Input
-                            placeholder="Filtrar por título ou fonte..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="h-9"
-                        />
-                    </div>
-                    <div className="w-full sm:w-40 space-y-1">
-                        <label className="text-xs font-semibold uppercase text-muted-foreground">Score Mínimo: {minScore}</label>
-                        <Input
-                            type="range"
-                            min="0"
-                            max="15"
-                            value={minScore}
-                            onChange={(e) => setMinScore(parseInt(e.target.value))}
-                            className="h-9"
-                        />
-                    </div>
-                    {filteredItems.length < reviewItems.length && (
-                        <Button variant="ghost" size="sm" onClick={() => { setSearchTerm(""); setMinScore(0); }} className="h-9">
-                            Limpar
-                        </Button>
+                    {/* Stats Cards */}
+                    {reviewItems.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <Card className="border-l-4 border-l-blue-500">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-medium text-muted-foreground">Total de Itens</p>
+                                            <p className="text-2xl font-bold mt-1">{reviewItems.length}</p>
+                                        </div>
+                                        <BarChart3 className="h-8 w-8 text-blue-500 opacity-50" />
+                                    </div>
+                                </CardContent>
+                            </Card>
+                            <Card className="border-l-4 border-l-green-500">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-medium text-muted-foreground">Filtrados</p>
+                                            <p className="text-2xl font-bold mt-1">{filteredItems.length}</p>
+                                        </div>
+                                        <Filter className="h-8 w-8 text-green-500 opacity-50" />
+                                    </div>
+                                </CardContent>
+                            </Card>
+                            <Card className="border-l-4 border-l-purple-500">
+                                <CardContent className="pt-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-medium text-muted-foreground">Selecionados</p>
+                                            <p className="text-2xl font-bold mt-1">{selectedIds.length}</p>
+                                        </div>
+                                        <CheckCircle className="h-8 w-8 text-purple-500 opacity-50" />
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
                     )}
                 </div>
 
+                {/* Filters Row */}
+                {reviewItems.length > 0 && (
+                    <Card className="border-border/50 shadow-sm">
+                        <CardContent className="pt-6">
+                            <div className="flex flex-col sm:flex-row gap-4 items-end">
+                                <div className="flex-1 space-y-2 w-full">
+                                    <label className="text-sm font-semibold flex items-center gap-2">
+                                        <Search className="h-4 w-4 text-muted-foreground" />
+                                        Pesquisar
+                                    </label>
+                                    <Input
+                                        placeholder="Filtrar por título ou fonte..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="h-10"
+                                    />
+                                </div>
+                                <div className="w-full sm:w-48 space-y-2">
+                                    <label className="text-sm font-semibold flex items-center gap-2">
+                                        <Filter className="h-4 w-4 text-muted-foreground" />
+                                        Score Mínimo: <span className="text-primary font-bold">{minScore}</span>
+                                    </label>
+                                    <div className="flex items-center gap-3">
+                                        <Input
+                                            type="range"
+                                            min="0"
+                                            max="15"
+                                            value={minScore}
+                                            onChange={(e) => setMinScore(parseInt(e.target.value))}
+                                            className="flex-1 h-2"
+                                        />
+                                        <span className="text-sm font-mono text-muted-foreground min-w-[2rem] text-right">{minScore}</span>
+                                    </div>
+                                </div>
+                                {(searchTerm || minScore > 0) && (
+                                    <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        onClick={() => { setSearchTerm(""); setMinScore(0); }} 
+                                        className="h-10"
+                                    >
+                                        <X className="h-4 w-4 mr-2" />
+                                        Limpar Filtros
+                                    </Button>
+                                )}
+                            </div>
+                            {(searchTerm || minScore > 0) && (
+                                <div className="mt-4 pt-4 border-t flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>Mostrando {filteredItems.length} de {reviewItems.length} itens</span>
+                                    {filteredItems.length < reviewItems.length && (
+                                        <Badge variant="secondary" className="ml-2">
+                                            {reviewItems.length - filteredItems.length} ocultos
+                                        </Badge>
+                                    )}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+
                 {/* Batch Actions Toolbar */}
                 {selectedIds.length > 0 && (
-                    <div className="sticky top-4 z-50 bg-background/95 backdrop-blur border border-primary/20 shadow-xl p-3 rounded-lg flex items-center justify-between animate-in slide-in-from-top-4 duration-300">
-                        <div className="flex items-center gap-3">
-                            <Badge variant="default" className="h-6">{selectedIds.length} selecionados</Badge>
-                            <Button variant="secondary" size="sm" onClick={() => setSelectedIds([])} className="h-8">Desmarcar</Button>
-                        </div>
-
-                        <div className="hidden md:flex items-center gap-1.5 border-x px-4 mx-2">
-                            <span className="text-[10px] uppercase font-bold text-muted-foreground whitespace-nowrap mr-1">Classificar como:</span>
-                            <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
-                                {CATEGORIES.map(cat => (
-                                    <Button
-                                        key={cat.id}
-                                        variant="ghost"
-                                        size="sm"
-                                        className={cn(
-                                            "h-7 px-2 text-[10px] uppercase font-bold border border-transparent hover:border-border",
-                                            cat.color
-                                        )}
-                                        onClick={() => handleBatchClassify(cat.id)}
-                                        disabled={isSubmitting}
+                    <Card className="sticky top-4 z-50 border-primary/30 shadow-lg bg-gradient-to-r from-primary/5 to-primary/10 backdrop-blur-sm">
+                        <CardContent className="pt-6">
+                            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                    <Badge variant="default" className="h-7 px-3 text-sm font-semibold">
+                                        {selectedIds.length} {selectedIds.length === 1 ? 'item selecionado' : 'itens selecionados'}
+                                    </Badge>
+                                    <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        onClick={() => setSelectedIds([])} 
+                                        className="h-8"
                                     >
-                                        {cat.label}
+                                        <X className="h-4 w-4 mr-2" />
+                                        Desmarcar Todos
                                     </Button>
-                                ))}
+                                </div>
+
+                                <div className="flex-1 hidden lg:flex items-center gap-2 border-x px-6 mx-2">
+                                    <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Classificar como:</span>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {CATEGORIES.map(cat => (
+                                            <Button
+                                                key={cat.id}
+                                                variant="ghost"
+                                                size="sm"
+                                                className={cn(
+                                                    "h-7 px-3 text-xs font-medium border transition-all hover:scale-105",
+                                                    cat.color
+                                                )}
+                                                onClick={() => handleBatchClassify(cat.id)}
+                                                disabled={isSubmitting}
+                                            >
+                                                {cat.label}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 w-full lg:w-auto">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleBatchRetry}
+                                        disabled={isSubmitting}
+                                        className="h-9 border-primary/30 flex-1 lg:flex-initial"
+                                    >
+                                        {isSubmitting ? (
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        ) : (
+                                            <Sparkles className="h-4 w-4 mr-2" />
+                                        )}
+                                        Extrair
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={handleBatchReject}
+                                        disabled={isSubmitting}
+                                        className="h-9 flex-1 lg:flex-initial"
+                                    >
+                                        {isSubmitting ? (
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        ) : (
+                                            <XCircle className="h-4 w-4 mr-2" />
+                                        )}
+                                        Rejeitar
+                                    </Button>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="flex items-center gap-2">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleBatchRetry}
-                                disabled={isSubmitting}
-                                className="h-8 border-primary/30"
-                            >
-                                <Sparkles className="h-3.5 w-3.5 mr-2" /> Extrair
-                            </Button>
-                            <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={handleBatchReject}
-                                disabled={isSubmitting}
-                                className="h-8"
-                            >
-                                <XCircle className="h-3.5 w-3.5 mr-2" /> Rejeitar
-                            </Button>
-                        </div>
-
-                    </div>
+                            {/* Mobile Classification Buttons */}
+                            <div className="lg:hidden mt-4 pt-4 border-t">
+                                <p className="text-xs font-semibold text-muted-foreground mb-2">Classificar como:</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {CATEGORIES.map(cat => (
+                                        <Button
+                                            key={cat.id}
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                                "h-7 px-2 text-xs font-medium border",
+                                                cat.color
+                                            )}
+                                            onClick={() => handleBatchClassify(cat.id)}
+                                            disabled={isSubmitting}
+                                        >
+                                            {cat.label}
+                                        </Button>
+                                    ))}
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
                 )}
 
 
@@ -377,7 +514,7 @@ export default function ReviewPage() {
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
+                                        <div className="md:col-span-2 space-y-2">
                                             <label className="text-sm font-medium">Título *</label>
                                             <Input
                                                 placeholder="Título da notícia"
@@ -391,6 +528,14 @@ export default function ReviewPage() {
                                                 placeholder="Ex: BBC, CNN, Blog..."
                                                 value={manualEntry.publisher}
                                                 onChange={(e) => setManualEntry({ ...manualEntry, publisher: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium">Data da Notícia</label>
+                                            <Input
+                                                type="date"
+                                                value={manualEntry.date}
+                                                onChange={(e) => setManualEntry({ ...manualEntry, date: e.target.value })}
                                             />
                                         </div>
                                     </div>
@@ -427,69 +572,124 @@ export default function ReviewPage() {
                 )}
 
                 {reviewItems.length === 0 ? (
-                    <Card className="border-dashed">
+                    <Card className="border-dashed border-2">
+                        <CardContent className="flex flex-col items-center justify-center py-20 space-y-4">
+                            <div className="h-20 w-20 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center">
+                                <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+                            </div>
+                            <div className="text-center space-y-2">
+                                <h3 className="text-2xl font-semibold">Tudo em dia!</h3>
+                                <p className="text-muted-foreground max-w-md">
+                                    Não há alertas pendentes de revisão manual no momento. 
+                                    Todos os itens foram processados com sucesso ou você pode adicionar novos conteúdos manualmente.
+                                </p>
+                            </div>
+                            {!isAddingManual && (
+                                <Button
+                                    onClick={() => setIsAddingManual(true)}
+                                    variant="outline"
+                                    className="mt-4"
+                                >
+                                    <PlusCircle className="h-4 w-4 mr-2" />
+                                    Adicionar Nova Notícia
+                                </Button>
+                            )}
+                        </CardContent>
+                    </Card>
+                ) : filteredItems.length === 0 ? (
+                    <Card className="border-dashed border-2 border-orange-200 dark:border-orange-800">
                         <CardContent className="flex flex-col items-center justify-center py-16 space-y-4">
-                            <div className="h-16 w-16 bg-green-50 rounded-full flex items-center justify-center">
-                                <CheckCircle className="h-10 w-10 text-green-500" />
+                            <div className="h-16 w-16 bg-orange-100 dark:bg-orange-900/20 rounded-full flex items-center justify-center">
+                                <Search className="h-8 w-8 text-orange-600 dark:text-orange-400" />
                             </div>
-                            <div className="text-center space-y-1">
-                                <h3 className="text-xl font-semibold">Tudo em dia!</h3>
-                                <p className="text-muted-foreground text-sm">Não há alertas pendentes de revisão manual no momento.</p>
+                            <div className="text-center space-y-2">
+                                <h3 className="text-xl font-semibold">Nenhum item encontrado</h3>
+                                <p className="text-muted-foreground text-sm">
+                                    Nenhum item corresponde aos filtros aplicados. Tente ajustar os critérios de busca.
+                                </p>
                             </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => { setSearchTerm(""); setMinScore(0); }}
+                            >
+                                <X className="h-4 w-4 mr-2" />
+                                Limpar Filtros
+                            </Button>
                         </CardContent>
                     </Card>
                 ) : (
-                    <div className="grid gap-6">
-                        {displayList.map((entry, idx) => {
-                            if (entry.type === 'cluster') {
-                                const groupItems = entry.items;
-                                // We use the first item's ID as the key for the cluster? Or a unique key
-                                return (
-                                    <div key={`cluster-${groupItems[0].duplicate_group_id}`} className="relative group">
-                                        {/* Batch selection for cluster? Maybe later. For now just the card. */}
-                                        <ClusterReviewCard
-                                            items={groupItems}
-                                            onMerge={mergeItems}
-                                            isProcessing={!!processingId}
-                                        />
-                                    </div>
-                                );
-                            } else {
-                                const item = entry.item;
-                                return (
-                                    <div key={item.id} className="relative group">
-                                        <div className="absolute -left-10 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedIds.includes(item.id)}
-                                                onChange={() => toggleSelection(item.id)}
-                                                className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
-                                            />
-                                        </div>
-                                        <div
-                                            className={cn(
-                                                "transition-all",
-                                                selectedIds.includes(item.id) && "ring-2 ring-primary ring-offset-4 rounded-lg"
-                                            )}
-                                            onClick={(e) => {
-                                                if (e.shiftKey) toggleSelection(item.id);
-                                            }}
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between text-sm text-muted-foreground mb-2">
+                            <span>
+                                Mostrando <strong className="text-foreground">{filteredItems.length}</strong> de <strong className="text-foreground">{reviewItems.length}</strong> itens
+                            </span>
+                            <span className="text-xs">
+                                Dica: Use Shift+Click para seleção múltipla
+                            </span>
+                        </div>
+                        <div className="grid gap-4">
+                            {displayList.map((entry, idx) => {
+                                if (entry.type === 'cluster') {
+                                    const groupItems = entry.items;
+                                    return (
+                                        <div 
+                                            key={`cluster-${groupItems[0].duplicate_group_id}`} 
+                                            className="relative animate-in fade-in slide-in-from-bottom-4"
+                                            style={{ animationDelay: `${idx * 50}ms` }}
                                         >
-                                            <ReviewCard
-                                                item={item}
-                                                processingId={processingId}
-                                                onRetry={retryItem}
-                                                onReject={rejectItem}
-                                                onSaveContent={saveManualContentAction}
-                                                onClassify={classifyItem}
+                                            <ClusterReviewCard
+                                                items={groupItems}
+                                                onMerge={mergeItems}
+                                                isProcessing={!!processingId}
                                             />
                                         </div>
-                                    </div>
-                                );
-                            }
-                        })}
+                                    );
+                                } else {
+                                    const item = entry.item;
+                                    const isSelected = selectedIds.includes(item.id);
+                                    return (
+                                        <div 
+                                            key={item.id} 
+                                            className="relative group animate-in fade-in slide-in-from-bottom-4"
+                                            style={{ animationDelay: `${idx * 50}ms` }}
+                                        >
+                                            <div className={cn(
+                                                "absolute -left-12 top-1/2 -translate-y-1/2 z-10 transition-all",
+                                                "opacity-0 group-hover:opacity-100",
+                                                isSelected && "opacity-100"
+                                            )}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleSelection(item.id)}
+                                                    className="h-5 w-5 rounded border-2 border-primary text-primary focus:ring-2 focus:ring-primary focus:ring-offset-2 cursor-pointer"
+                                                />
+                                            </div>
+                                            <div
+                                                className={cn(
+                                                    "transition-all duration-200 rounded-lg",
+                                                    isSelected && "ring-2 ring-primary ring-offset-2 shadow-lg scale-[1.01]"
+                                                )}
+                                                onClick={(e) => {
+                                                    if (e.shiftKey) toggleSelection(item.id);
+                                                }}
+                                            >
+                                                <ReviewCard
+                                                    item={item}
+                                                    processingId={processingId}
+                                                    onRetry={retryItem}
+                                                    onReject={rejectItem}
+                                                    onSaveContent={saveManualContentAction}
+                                                    onClassify={classifyItem}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                            })}
+                        </div>
                     </div>
-
                 )}
             </div>
         </DashboardLayout>

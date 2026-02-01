@@ -21,7 +21,7 @@ import {
     Brain,
     Send,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getDisplayUrl } from "@/lib/utils";
 import type { PipelineItem, StageId } from "@/types";
 import { useNavigate } from "react-router-dom";
 
@@ -102,7 +102,7 @@ export const PipelineCard = memo(function PipelineCard({
                 <div className="flex items-center gap-1">
                     {/* External Link */}
                     <a
-                        href={item.clean_url || item.url}
+                        href={getDisplayUrl(item)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="p-1.5 hover:text-primary hover:bg-primary/10 rounded transition-colors"
@@ -122,7 +122,7 @@ export const PipelineCard = memo(function PipelineCard({
                             {stageId === "pending" && (
                                 <button
                                     onClick={() =>
-                                        onExtract(item.id, item.clean_url || item.url)
+                                        onExtract(item.id, getDisplayUrl(item))
                                     }
                                     className="p-1.5 hover:text-blue-500 hover:bg-blue-500/10 rounded transition-colors"
                                     title="Extrair Conteúdo"
@@ -192,7 +192,7 @@ export const PipelineCard = memo(function PipelineCard({
                         <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem
                                 onClick={() =>
-                                    window.open(item.clean_url || item.url, "_blank")
+                                    window.open(getDisplayUrl(item), "_blank")
                                 }
                             >
                                 <Eye className="h-4 w-4 mr-2" />

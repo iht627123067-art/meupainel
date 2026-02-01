@@ -258,11 +258,21 @@ async function fetchContentAsMarkdown(url: string): Promise<{
 async function fallbackExtraction(url: string): Promise<{ markdown: string; wordCount: number, source: string }> {
     console.log(`   Running robust fallback extraction for: ${url}`);
 
-    // Improved User-Agent
+    // Improved User-Agent and Headers - Using Googlebot string often bypasses basic blocks
     const response = await fetch(url, {
         headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "max-age=0",
+            "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1"
         },
     });
 
@@ -343,8 +353,39 @@ async function fallbackExtraction(url: string): Promise<{ markdown: string; word
         }
     });
 
+    // Extract metadata from HTML meta tags
+    let title: string | undefined;
+    let siteName: string | undefined;
+    let publishedTime: string | undefined;
+
+    // Try multiple meta tag strategies for title
+    title = $('meta[property="og:title"]').attr('content') ||
+        $('meta[name="twitter:title"]').attr('content') ||
+        $('title').text().trim() ||
+        $('h1').first().text().trim();
+
+    // Extract site name / publisher
+    siteName = $('meta[property="og:site_name"]').attr('content') ||
+        $('meta[name="application-name"]').attr('content') ||
+        $('meta[property="twitter:site"]').attr('content');
+
+    // Extract published date
+    publishedTime = $('meta[property="article:published_time"]').attr('content') ||
+        $('meta[name="publish-date"]').attr('content') ||
+        $('meta[name="date"]').attr('content') ||
+        $('time[datetime]').attr('datetime');
+
+    console.log(`   📋 Metadata extracted - Title: ${title ? '✓' : '✗'} | Site: ${siteName ? '✓' : '✗'} | Date: ${publishedTime ? '✓' : '✗'}`);
+
     const wordCount = markdown.split(/\s+/).filter(w => w.length > 0).length;
-    return { markdown, wordCount, source: 'cheerio-robust' };
+    return {
+        markdown,
+        wordCount,
+        source: 'cheerio-robust',
+        title,
+        siteName,
+        publishedTime
+    };
 }
 
 /**
@@ -478,9 +519,9 @@ Deno.serve(async (req: Request) => {
             extractionResult = await fetchContentAsMarkdown(urlToExtract);
 
             // Validate content quality/presence
-            if (!extractionResult.markdown || extractionResult.markdown.trim().length < 50 ||
-                extractionResult.markdown.toLowerCase().includes("google news") && extractionResult.markdown.length < 200) {
-                throw new Error("Extracted content is too short or appears to be a placeholder (Google News).");
+            if (!extractionResult.markdown || extractionResult.markdown.trim().length < 20 ||
+                extractionResult.markdown.toLowerCase().includes("google news") && extractionResult.markdown.length < 100) {
+                throw new Error("Extracted content is too short or appears to be a placeholder.");
             }
         } catch (primaryError: any) {
             console.warn(`⚠️ Primary extraction (Jina) failed: ${primaryError.message}. Trying Cheerio fallback...`);

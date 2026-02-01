@@ -132,7 +132,24 @@ export function AlertsTable({ alerts, onApprove, onReject, isLoading, onRowClick
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  {alert.publisher || "—"}
+                  <div className="flex items-center gap-2">
+                    {alert.url && (() => {
+                      try {
+                        const domain = new URL(alert.url).hostname;
+                        return (
+                          <img
+                            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                            alt=""
+                            className="w-4 h-4 rounded-sm opacity-70"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        );
+                      } catch { return null; }
+                    })()}
+                    <span className="truncate max-w-[120px]" title={alert.publisher || ""}>
+                      {alert.publisher || "—"}
+                    </span>
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="secondary" className={cn("status-badge", status.className)}>

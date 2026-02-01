@@ -17,6 +17,8 @@ export interface Alert {
     is_valid: boolean;
     keywords: string[] | null;
     created_at: string;
+    duplicate_group_id?: string | null;
+    personalization_score?: number | null;
 }
 
 export interface PipelineItem {

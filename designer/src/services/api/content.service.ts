@@ -8,7 +8,7 @@ import { withRetry, withTimeout, isRetryableError, ExtractionError } from "../pi
 import { shouldMoveToReview, getStatusAfterExtraction } from "../pipeline/status.manager";
 import { updateAlertStatus } from "./alerts.service";
 
-import { cleanGoogleUrl } from "@/lib/utils";
+import { cleanUrl } from "@/lib/utils";
 
 export interface ExtractionResult {
     word_count: number;
@@ -25,14 +25,14 @@ export async function extractContent(
     translate: boolean = false
 ): Promise<ExtractionResult> {
     // Clean URL before processing
-    const cleanUrl = cleanGoogleUrl(url);
+    const cleanedUrl = cleanUrl(url);
 
     try {
         const result = await withRetry(
             async () => {
                 const { data, error } = await withTimeout(
                     supabase.functions.invoke("extract-content", {
-                        body: { alert_id: alertId, url: cleanUrl, translate },
+                        body: { alert_id: alertId, url: cleanedUrl, translate },
                     }),
                     60000, // 60 second timeout to allow for extraction + translation
                     "Content extraction timed out"
@@ -131,25 +131,27 @@ export async function createManualEntry(
     title: string,
     url: string,
     publisher: string,
-    content: string
+    content: string,
+    date?: string
 ): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // 1. Create alert
+    // 1. Create or Update alert (Upsert to handle duplicate URLs)
     const { data: alert, error: alertError } = await supabase
         .from("alerts")
-        .insert({
+        .upsert({
             user_id: user.id,
             title,
             url,
             clean_url: url,
             publisher,
+            email_date: date || new Date().toISOString(),
             status: 'extracted', // Directly to extracted as we have content
             is_valid: true,
-            source_type: 'google_news', // Default generic source
+            source_type: 'rss', // Valid enum value for manual entries
             description: content.substring(0, 200) + "..."
-        })
+        }, { onConflict: 'clean_url' })
         .select()
         .single();
 
@@ -170,30 +172,40 @@ export async function createAlertAndExtract(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // 1. Create temporary alert
+    // 1. Create temporary alert (Upsert to reset/retry if needed)
     const { data: alert, error: alertError } = await supabase
         .from("alerts")
-        .insert({
+        .upsert({
             user_id: user.id,
             title: "Extraindo...",
             url,
             clean_url: url,
             status: 'pending',
             is_valid: true,
-            source_type: 'google_news'
-        })
+            source_type: 'rss'
+        }, { onConflict: 'clean_url' })
         .select()
         .single();
 
     if (alertError) throw alertError;
     if (!alert) throw new Error("Erro ao criar alerta");
 
-    // 2. Call extraction
+    // 2. Call extraction with a longer UI timeout
     try {
-        await extractContent(alert.id, url, translate);
+        await withTimeout(
+            extractContent(alert.id, url, translate),
+            100000, // 100s UI timeout for the whole chain
+            "A extração está demorando mais que o esperado, mas continuará em segundo plano."
+        );
     } catch (error) {
-        console.error("Extraction failed during manual URL add:", error);
-        // Alert status is already handled by extractContent (becomes needs_review)
+        console.error("Extraction failed or timed out during manual URL add:", error);
+
+        // Ensure title is updated to show it failed to the user
+        await supabase.from("alerts").update({
+            title: "Problema na Extração (Ajuste Manual)",
+            status: "needs_review"
+        }).eq("id", alert.id);
+
         throw error;
     }
 }

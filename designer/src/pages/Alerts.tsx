@@ -1,7 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AlertsTable } from "@/components/dashboard/AlertsTable";
-import { ImportEmailsModal, AlertDetailPanel } from "@/components/alerts";
+import { ImportEmailsModal, AlertDetailPanel, ClusterAlertsCard } from "@/components/alerts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 export default function Alerts() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -46,6 +47,9 @@ export default function Alerts() {
     setSelectedAlert,
     toggleStatusFilter,
     fetchAlerts,
+    loadMore,
+    hasMore,
+    totalCount,
     handleApprove,
     handleReject,
     handleExtract,
@@ -197,6 +201,93 @@ export default function Alerts() {
     navigate(`/research?context_ids=${idsParam}`);
   }, [selectedIds, navigate]);
 
+  // Create displayList with clustering logic (similar to Review.tsx)
+  const displayList = useMemo(() => {
+    const list = filteredAlerts.reduce((acc, item) => {
+      if (item.duplicate_group_id) {
+        // Find existing cluster with same duplicate_group_id
+        const existingGroup = acc.find(
+          (x) =>
+            x.type === 'cluster' &&
+            x.items &&
+            x.items.length > 0 &&
+            x.items[0].duplicate_group_id === item.duplicate_group_id
+        ) as { type: 'cluster'; items: Alert[] } | undefined;
+
+        if (existingGroup) {
+          existingGroup.items.push(item);
+        } else {
+          acc.push({ type: 'cluster', items: [item] });
+        }
+      } else {
+        acc.push({ type: 'single', item });
+      }
+      return acc;
+    }, [] as Array<{ type: 'single'; item: Alert } | { type: 'cluster'; items: Alert[] }>);
+
+    // Sort by highest score in group/item
+    list.sort((a, b) => {
+      const scoreA =
+        a.type === 'single'
+          ? a.item.personalization_score || 0
+          : Math.max(...a.items.map((i) => i.personalization_score || 0));
+      const scoreB =
+        b.type === 'single'
+          ? b.item.personalization_score || 0
+          : Math.max(...b.items.map((i) => i.personalization_score || 0));
+      return scoreB - scoreA;
+    });
+
+    return list;
+  }, [filteredAlerts]);
+
+  // Cluster action handlers
+  const handleApproveCluster = useCallback(
+    async (selectedId: string, allIds: string[]) => {
+      try {
+        // Approve the selected item
+        await handleApprove(selectedId);
+        // Reject the others
+        const rejectIds = allIds.filter((id) => id !== selectedId);
+        for (const id of rejectIds) {
+          await handleReject(id);
+        }
+        toast({
+          title: "Cluster aprovado!",
+          description: `Item selecionado aprovado, ${rejectIds.length} duplicatas rejeitadas.`,
+        });
+      } catch (error) {
+        toast({
+          title: "Erro ao aprovar cluster",
+          description: error instanceof Error ? error.message : "Erro desconhecido",
+          variant: "destructive",
+        });
+      }
+    },
+    [handleApprove, handleReject, toast]
+  );
+
+  const handleRejectCluster = useCallback(
+    async (allIds: string[]) => {
+      try {
+        for (const id of allIds) {
+          await handleReject(id);
+        }
+        toast({
+          title: "Cluster rejeitado!",
+          description: `${allIds.length} itens rejeitados.`,
+        });
+      } catch (error) {
+        toast({
+          title: "Erro ao rejeitar cluster",
+          description: error instanceof Error ? error.message : "Erro desconhecido",
+          variant: "destructive",
+        });
+      }
+    },
+    [handleReject, toast]
+  );
+
   return (
     <DashboardLayout>
       <BulkActionsBar
@@ -232,7 +323,7 @@ export default function Alerts() {
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline" className="px-3 py-1">
             <Mail className="h-3 w-3 mr-1" />
-            Total: {alerts.length}
+            Total: {totalCount}
           </Badge>
           {Object.entries(statusCounts).map(([status, count]) => (
             <Badge
@@ -277,17 +368,72 @@ export default function Alerts() {
           </DropdownMenu>
         </div>
 
-        {/* Alerts Table */}
-        <AlertsTable
-          alerts={filteredAlerts}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          isLoading={isLoading}
-          onRowClick={handleRowClick}
-          selectedIds={selectedIds}
-          onToggleSelect={handleToggleSelect}
-          onSelectAll={handleSelectAll}
-        />
+        {/* Alerts Display - Clusters and Single Items */}
+        {isLoading ? (
+          <div className="glass-card p-8">
+            <div className="flex items-center justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          </div>
+        ) : displayList.length === 0 ? (
+          <div className="glass-card p-12 text-center">
+            <p className="text-muted-foreground">Nenhum alerta encontrado</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Render clusters first */}
+            {displayList
+              .filter((entry) => entry.type === 'cluster')
+              .map((entry, idx) => {
+                const groupItems = (entry as { type: 'cluster'; items: Alert[] }).items;
+                return (
+                  <div
+                    key={`cluster-${groupItems[0].duplicate_group_id}`}
+                    className="relative animate-in fade-in slide-in-from-bottom-4"
+                    style={{ animationDelay: `${idx * 50}ms` }}
+                  >
+                    <ClusterAlertsCard
+                      items={groupItems}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
+                      onApproveCluster={handleApproveCluster}
+                      onRejectCluster={handleRejectCluster}
+                    />
+                  </div>
+                );
+              })}
+
+            {/* Render single items in one table */}
+            {(() => {
+              const singleItems = displayList
+                .filter((entry) => entry.type === 'single')
+                .map((entry) => (entry as { type: 'single'; item: Alert }).item);
+
+              if (singleItems.length > 0) {
+                return (
+                  <AlertsTable
+                    alerts={singleItems}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onRowClick={handleRowClick}
+                    selectedIds={selectedIds}
+                    onToggleSelect={handleToggleSelect}
+                    onSelectAll={handleSelectAll}
+                  />
+                );
+              }
+              return null;
+            })()}
+          </div>
+        )}
+
+        {hasMore && !isLoading && (
+          <div className="flex justify-center pt-4 pb-8">
+            <Button variant="outline" onClick={loadMore} className="w-full max-w-sm">
+              Carregar mais
+            </Button>
+          </div>
+        )}
 
         {/* Import Modal */}
         <ImportEmailsModal

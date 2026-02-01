@@ -53,6 +53,11 @@ export async function classifyContent(
         );
 
         // Update status based on classification success AND destination
+        // Safely check result and destination
+        if (!result || typeof result !== 'object') {
+            throw new Error("Invalid classification result received");
+        }
+
         let newStatus = getStatusAfterClassification(result.success);
 
         // Respect explicit "needs_review" from API even if success is true

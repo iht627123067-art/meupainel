@@ -223,12 +223,42 @@ Deno.serve(async (req: Request) => {
             keywords: extractKeywords(article.title + " " + article.description),
         }));
 
-        const { error } = await supabase.from("alerts").insert(records);
+        const { data: insertedRecords, error } = await supabase
+            .from("alerts")
+            .insert(records)
+            .select();
 
         if (error) {
             console.error("Supabase insert error:", error);
             throw error;
         }
+
+        // Trigger Clustering for each inserted alert
+        // We do this asynchronously (no await inside loop) OR sequentially if we want strong consistency?
+        // Sequential is safer for clustering (Order matters: Item 2 might cluster with Item 1).
+
+        console.log(`Clustering ${insertedRecords.length} new alerts...`);
+        let clusterCount = 0;
+
+        for (const record of insertedRecords) {
+            try {
+                // Use email_date as the "publish time" for clustering logic if available
+                const publishDate = record.email_date || record.created_at;
+
+                await supabase.rpc('assign_or_create_group_v2', {
+                    p_alert_id: record.id,
+                    p_title: record.title,
+                    p_description: record.description || "",
+                    p_url: record.url,
+                    p_created_at: publishDate
+                });
+                clusterCount++;
+            } catch (err) {
+                console.error(`Failed to cluster alert ${record.id}:`, err);
+            }
+        }
+
+        console.log(`Clustering complete. Processed ${clusterCount}/${insertedRecords.length}.`);
 
         return new Response(
             JSON.stringify({

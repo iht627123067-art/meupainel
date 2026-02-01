@@ -1,0 +1,74 @@
+[
+    {
+        "id": "real-1",
+        "title": "UAlbany: Every job in the future, even vocational work, will require AI - Times Union",
+        "description": "UAlbany: Every job in the future, even vocational work, will require AI Times Union",
+        "created_at": "2026-01-31 18:50:30+00"
+    },
+    {
+        "id": "real-2",
+        "title": "Universities of Wisconsin at forefront of artificial intelligence | Jay Rothman - Wisconsin State Journal",
+        "description": "Universities of Wisconsin at forefront of artificial intelligence | Jay Rothman Wisconsin State Journal",
+        "created_at": "2026-01-31 18:50:30+00"
+    },
+    {
+        "id": "real-3",
+        "title": "Op-Ed: How Artificial Intelligence Is Rewriting the Global Order—and India’s Role Within It - The Indian EYE",
+        "description": "Op-Ed: How Artificial Intelligence Is Rewriting the Global Order—and India’s Role Within It The Indian EYE",
+        "created_at": "2026-01-31 18:50:30+00"
+    },
+    {
+        "id": "real-4",
+        "title": "Pope Leo XIV warns that artificial intelligence can damage human relationships - El Adelantado",
+        "description": "Pope Leo XIV warns that artificial intelligence can damage human relationships and calls for its uncontrolled use to be curbed",
+        "created_at": "2026-01-31 18:50:30+00"
+    },
+    {
+        "id": "real-5",
+        "title": "Opinion | Pay More Attention to A.I. - The New York Times",
+        "description": "Opinion | Pay More Attention to A.I. The New York Times",
+        "created_at": "2026-01-31 18:50:30+00"
+    },
+    {
+        "id": "real-6",
+        "title": "Governança de dados e IA impulsionam ESG com resultados concretos - O TEMPO",
+        "description": "Inteligência Artificial (IA) bem aplicada encurta o caminho entre intenção e impacto. ... De acordo com a Agência Internacional de Energia, os ...",
+        "created_at": "2026-01-31 18:00:20+00"
+    },
+    {
+        "id": "real-7",
+        "title": "Acordo UE-Mercosul: veja as próximas etapas para tratado começar a valer - Viva",
+        "description": "Regras de origem, serviços e propriedade intelectual - O acordo inclui regras ... Empresas usam inteligência artificial para acelerar pesquisa ...",
+        "created_at": "2026-01-31 18:00:20+00"
+    },
+    {
+        "id": "synth-1",
+        "title": "Jay Rothman: UW System leading the way in artificial intelligence - Education Weekly",
+        "description": "Jay Rothman discusses how Universities of Wisconsin are at the forefront of AI research and education.",
+        "created_at": "2026-01-31 12:00:00+00"
+    },
+    {
+        "id": "synth-2",
+        "title": "Pope warns about AI damaging human connections - Vatican News",
+        "description": "The Pontiff expressed concerns that artificial intelligence might negatively impact human relationships if uncontrolled.",
+        "created_at": "2026-01-31 10:00:00+00"
+    },
+    {
+        "id": "synth-3",
+        "title": "Como a IA e governança de dados ajudam no ESG - Tech Brasil",
+        "description": "Resultados concretos de ESG são impulsionados por governança de dados sólida e inteligência artificial.",
+        "created_at": "2026-01-30 18:00:00+00"
+    },
+    {
+        "id": "synth-4",
+        "title": "Lula viaja para a China para discutir acordos comerciais - Folha",
+        "description": "Presidente busca novos investimentos em tecnologia e agronegócio.",
+        "created_at": "2026-01-25 10:00:00+00"
+    },
+    {
+        "id": "synth-5",
+        "title": "Lula chega na China com comitiva de empresários - G1",
+        "description": "Viagem foca em parcerias estratégicas. Presidente Lula desembarcou hoje em Pequim.",
+        "created_at": "2026-01-31 19:00:00+00"
+    }
+]
