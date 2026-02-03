@@ -160,17 +160,92 @@ export function ReviewCard({
         }
     })();
 
+    // Calculate relative time (e.g., "há 2 horas")
+    const getRelativeTime = () => {
+        try {
+            const rawDate = item.created_at;
+            if (!rawDate) return null;
+            const date = new Date(rawDate);
+            if (isNaN(date.getTime())) return null;
+
+            const now = new Date();
+            const diffMs = now.getTime() - date.getTime();
+            const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffHours / 24);
+
+            if (diffHours < 1) return "há menos de 1h";
+            if (diffHours < 24) return `há ${diffHours}h`;
+            if (diffDays === 1) return "há 1 dia";
+            if (diffDays < 7) return `há ${diffDays} dias`;
+            if (diffDays < 30) return `há ${Math.floor(diffDays / 7)} semanas`;
+            return `há ${Math.floor(diffDays / 30)} meses`;
+        } catch {
+            return null;
+        }
+    };
+
+    const relativeTime = getRelativeTime();
+
+    // Get publisher color (consistent hashing)
+    const getPublisherColor = (publisher: string | null) => {
+        if (!publisher) return "bg-gray-100 text-gray-700 border-gray-200";
+        const hash = publisher.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const colors = [
+            "bg-blue-50 text-blue-700 border-blue-200",
+            "bg-purple-50 text-purple-700 border-purple-200",
+            "bg-green-50 text-green-700 border-green-200",
+            "bg-pink-50 text-pink-700 border-pink-200",
+            "bg-indigo-50 text-indigo-700 border-indigo-200",
+            "bg-cyan-50 text-cyan-700 border-cyan-200",
+        ];
+        return colors[hash % colors.length];
+    };
+
     return (
-        <Card className="border-l-4 border-l-orange-500 overflow-hidden">
+        <Card className="border-l-4 border-l-orange-500 overflow-hidden hover:shadow-md transition-shadow">
             <CardHeader className="pb-3">
-                <div className="flex justify-between items-start">
-                    <div className="space-y-1 pr-4">
-                        <CardTitle className="text-lg leading-tight">{item.title || "Sem Título"}</CardTitle>
-                        <CardDescription>
-                            {item.publisher || "Fonte desconhecida"} • {safeDisplayDate}
-                        </CardDescription>
+                <div className="flex justify-between items-start gap-4">
+                    <div className="space-y-2 flex-1 min-w-0">
+                        <div className="flex items-start gap-2 flex-wrap">
+                            <CardTitle className="text-lg leading-tight flex-1 min-w-0">{item.title || "Sem Título"}</CardTitle>
+                            {/* Score Badge - More Prominent */}
+                            {item.personalization_score != null && (
+                                <Badge
+                                    variant="outline"
+                                    className={cn(
+                                        "shrink-0 font-bold text-sm px-2.5 py-0.5",
+                                        item.personalization_score >= 7
+                                            ? "bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 border-green-300"
+                                            : item.personalization_score >= 4
+                                                ? "bg-gradient-to-r from-yellow-50 to-amber-50 text-yellow-700 border-yellow-300"
+                                                : "bg-gray-50 text-gray-600 border-gray-300"
+                                    )}
+                                >
+                                    ⭐ {item.personalization_score}
+                                </Badge>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap text-sm">
+                            {/* Publisher Badge */}
+                            <Badge variant="outline" className={cn("text-xs font-medium", getPublisherColor(item.publisher))}>
+                                {item.publisher || "Fonte desconhecida"}
+                            </Badge>
+                            {/* Date */}
+                            <span className="text-xs text-muted-foreground">
+                                {safeDisplayDate}
+                            </span>
+                            {/* Relative Time */}
+                            {relativeTime && (
+                                <>
+                                    <span className="text-xs text-muted-foreground">•</span>
+                                    <span className="text-xs text-muted-foreground font-medium">
+                                        {relativeTime}
+                                    </span>
+                                </>
+                            )}
+                        </div>
                     </div>
-                    <Badge variant="outline" className="text-orange-500 border-orange-200 bg-orange-50 shrink-0">
+                    <Badge variant="outline" className="text-orange-500 border-orange-200 bg-orange-50 shrink-0 whitespace-nowrap">
                         Necessita de Revisão
                     </Badge>
                 </div>

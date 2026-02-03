@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { usePipeline } from "@/hooks/usePipeline";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, AlertTriangle, PlusCircle, Save, X, FileText, Link2, Sparkles, Loader2, XCircle, Search, Filter, BarChart3 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CheckCircle, AlertTriangle, PlusCircle, Save, X, FileText, Link2, Sparkles, Loader2, XCircle, Search, Filter, BarChart3, ArrowUpDown, Calendar, Tag } from "lucide-react";
 import { ReviewCard, CATEGORIES } from "@/components/pipeline/ReviewCard";
 import { ClusterReviewCard } from "@/components/pipeline/ClusterReviewCard";
 import { createManualEntry, createAlertAndExtract } from "@/services/api/content.service";
@@ -42,16 +43,76 @@ export default function ReviewPage() {
     const [minScore, setMinScore] = useState<number>(0);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
+    // New filter states
+    const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "score_desc" | "source">("date_desc");
+    const [filterSource, setFilterSource] = useState<string>("all");
+    const [filterPeriod, setFilterPeriod] = useState<"24h" | "7d" | "30d" | "all">("all");
+    const [filterHasKeywords, setFilterHasKeywords] = useState<"all" | "with" | "without">("all");
+
 
     const reviewItems = items.needs_review || [];
 
-    const filteredItems = reviewItems.filter(item => {
-        const title = item.title || "";
-        const matchesSearch = title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (item.publisher && item.publisher.toLowerCase().includes(searchTerm.toLowerCase()));
-        const matchesScore = (item.personalization_score || 0) >= minScore;
-        return matchesSearch && matchesScore;
-    });
+    // Extract unique publishers for filter dropdown
+    const uniquePublishers = useMemo(() => {
+        const publishers = new Set<string>();
+        reviewItems.forEach(item => {
+            if (item.publisher) publishers.add(item.publisher);
+        });
+        return Array.from(publishers).sort();
+    }, [reviewItems]);
+
+    // Advanced filtering logic
+    const filteredItems = useMemo(() => {
+        let filtered = reviewItems.filter(item => {
+            // Text search
+            const title = item.title || "";
+            const matchesSearch = title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (item.publisher && item.publisher.toLowerCase().includes(searchTerm.toLowerCase()));
+            if (!matchesSearch) return false;
+
+            // Score filter
+            const matchesScore = (item.personalization_score || 0) >= minScore;
+            if (!matchesScore) return false;
+
+            // Source filter
+            if (filterSource !== "all" && item.publisher !== filterSource) return false;
+
+            // Period filter
+            if (filterPeriod !== "all") {
+                const itemDate = new Date(item.created_at);
+                const now = new Date();
+                const hoursDiff = (now.getTime() - itemDate.getTime()) / (1000 * 60 * 60);
+
+                if (filterPeriod === "24h" && hoursDiff > 24) return false;
+                if (filterPeriod === "7d" && hoursDiff > 24 * 7) return false;
+                if (filterPeriod === "30d" && hoursDiff > 24 * 30) return false;
+            }
+
+            // Keywords filter
+            if (filterHasKeywords === "with" && (!item.keywords || item.keywords.length === 0)) return false;
+            if (filterHasKeywords === "without" && item.keywords && item.keywords.length > 0) return false;
+
+            return true;
+        });
+
+        // Sorting
+        filtered.sort((a, b) => {
+            switch (sortBy) {
+                case "date_desc":
+                    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                case "date_asc":
+                    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+                case "score_desc":
+                    return (b.personalization_score || 0) - (a.personalization_score || 0);
+                case "source":
+                    return (a.publisher || "").localeCompare(b.publisher || "");
+                default:
+                    return 0;
+            }
+        });
+
+        return filtered;
+    }, [reviewItems, searchTerm, minScore, filterSource, filterPeriod, filterHasKeywords, sortBy]);
 
     const displayList = filteredItems.reduce((acc, item) => {
         if (item.duplicate_group_id) {
@@ -233,7 +294,7 @@ export default function ReviewPage() {
                                     Revisão Manual
                                 </h1>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    {reviewItems.length > 0 
+                                    {reviewItems.length > 0
                                         ? `${reviewItems.length} ${reviewItems.length === 1 ? 'item' : 'itens'} pendentes de revisão`
                                         : 'Nenhum item pendente'
                                     }
@@ -291,62 +352,155 @@ export default function ReviewPage() {
                     )}
                 </div>
 
+
                 {/* Filters Row */}
                 {reviewItems.length > 0 && (
                     <Card className="border-border/50 shadow-sm">
                         <CardContent className="pt-6">
-                            <div className="flex flex-col sm:flex-row gap-4 items-end">
-                                <div className="flex-1 space-y-2 w-full">
-                                    <label className="text-sm font-semibold flex items-center gap-2">
-                                        <Search className="h-4 w-4 text-muted-foreground" />
-                                        Pesquisar
-                                    </label>
-                                    <Input
-                                        placeholder="Filtrar por título ou fonte..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="h-10"
-                                    />
-                                </div>
-                                <div className="w-full sm:w-48 space-y-2">
-                                    <label className="text-sm font-semibold flex items-center gap-2">
-                                        <Filter className="h-4 w-4 text-muted-foreground" />
-                                        Score Mínimo: <span className="text-primary font-bold">{minScore}</span>
-                                    </label>
-                                    <div className="flex items-center gap-3">
+                            <div className="space-y-4">
+                                {/* First row: Search and Score */}
+                                <div className="flex flex-col sm:flex-row gap-4 items-end">
+                                    <div className="flex-1 space-y-2 w-full">
+                                        <label className="text-sm font-semibold flex items-center gap-2">
+                                            <Search className="h-4 w-4 text-muted-foreground" />
+                                            Pesquisar
+                                        </label>
                                         <Input
-                                            type="range"
-                                            min="0"
-                                            max="15"
-                                            value={minScore}
-                                            onChange={(e) => setMinScore(parseInt(e.target.value))}
-                                            className="flex-1 h-2"
+                                            placeholder="Filtrar por título ou fonte..."
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            className="h-10"
                                         />
-                                        <span className="text-sm font-mono text-muted-foreground min-w-[2rem] text-right">{minScore}</span>
+                                    </div>
+                                    <div className="w-full sm:w-48 space-y-2">
+                                        <label className="text-sm font-semibold flex items-center gap-2">
+                                            <Filter className="h-4 w-4 text-muted-foreground" />
+                                            Score Mínimo: <span className="text-primary font-bold">{minScore}</span>
+                                        </label>
+                                        <div className="flex items-center gap-3">
+                                            <Input
+                                                type="range"
+                                                min="0"
+                                                max="15"
+                                                value={minScore}
+                                                onChange={(e) => setMinScore(parseInt(e.target.value))}
+                                                className="flex-1 h-2"
+                                            />
+                                            <span className="text-sm font-mono text-muted-foreground min-w-[2rem] text-right">{minScore}</span>
+                                        </div>
                                     </div>
                                 </div>
-                                {(searchTerm || minScore > 0) && (
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm" 
-                                        onClick={() => { setSearchTerm(""); setMinScore(0); }} 
-                                        className="h-10"
-                                    >
-                                        <X className="h-4 w-4 mr-2" />
-                                        Limpar Filtros
-                                    </Button>
-                                )}
-                            </div>
-                            {(searchTerm || minScore > 0) && (
-                                <div className="mt-4 pt-4 border-t flex items-center gap-2 text-sm text-muted-foreground">
-                                    <span>Mostrando {filteredItems.length} de {reviewItems.length} itens</span>
-                                    {filteredItems.length < reviewItems.length && (
-                                        <Badge variant="secondary" className="ml-2">
-                                            {reviewItems.length - filteredItems.length} ocultos
-                                        </Badge>
+
+                                {/* Second row: Advanced filters */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    {/* Sort By */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-semibold flex items-center gap-2">
+                                            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+                                            Ordenar por
+                                        </label>
+                                        <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+                                            <SelectTrigger className="h-10">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="date_desc">Mais recentes</SelectItem>
+                                                <SelectItem value="date_asc">Mais antigas</SelectItem>
+                                                <SelectItem value="score_desc">Maior score</SelectItem>
+                                                <SelectItem value="source">Por fonte (A-Z)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    {/* Filter by Source */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-semibold flex items-center gap-2">
+                                            <FileText className="h-4 w-4 text-muted-foreground" />
+                                            Fonte
+                                        </label>
+                                        <Select value={filterSource} onValueChange={setFilterSource}>
+                                            <SelectTrigger className="h-10">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Todas as fontes</SelectItem>
+                                                {uniquePublishers.map(publisher => (
+                                                    <SelectItem key={publisher} value={publisher}>
+                                                        {publisher}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    {/* Filter by Period */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-semibold flex items-center gap-2">
+                                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                                            Período
+                                        </label>
+                                        <Select value={filterPeriod} onValueChange={(value: any) => setFilterPeriod(value)}>
+                                            <SelectTrigger className="h-10">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Todos</SelectItem>
+                                                <SelectItem value="24h">Últimas 24h</SelectItem>
+                                                <SelectItem value="7d">Últimos 7 dias</SelectItem>
+                                                <SelectItem value="30d">Últimos 30 dias</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    {/* Filter by Keywords */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-semibold flex items-center gap-2">
+                                            <Tag className="h-4 w-4 text-muted-foreground" />
+                                            Temas
+                                        </label>
+                                        <Select value={filterHasKeywords} onValueChange={(value: any) => setFilterHasKeywords(value)}>
+                                            <SelectTrigger className="h-10">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Todos</SelectItem>
+                                                <SelectItem value="with">Com temas</SelectItem>
+                                                <SelectItem value="without">Sem temas</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                {/* Clear filters button and stats */}
+                                <div className="flex items-center justify-between pt-2 border-t">
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <span>Mostrando <strong className="text-foreground">{filteredItems.length}</strong> de <strong className="text-foreground">{reviewItems.length}</strong> itens</span>
+                                        {filteredItems.length < reviewItems.length && (
+                                            <Badge variant="secondary" className="ml-2">
+                                                {reviewItems.length - filteredItems.length} ocultos
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    {(searchTerm || minScore > 0 || filterSource !== "all" || filterPeriod !== "all" || filterHasKeywords !== "all" || sortBy !== "date_desc") && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                                setSearchTerm("");
+                                                setMinScore(0);
+                                                setFilterSource("all");
+                                                setFilterPeriod("all");
+                                                setFilterHasKeywords("all");
+                                                setSortBy("date_desc");
+                                            }}
+                                            className="h-9"
+                                        >
+                                            <X className="h-4 w-4 mr-2" />
+                                            Limpar Todos os Filtros
+                                        </Button>
                                     )}
                                 </div>
-                            )}
+                            </div>
                         </CardContent>
                     </Card>
                 )}
@@ -360,10 +514,10 @@ export default function ReviewPage() {
                                     <Badge variant="default" className="h-7 px-3 text-sm font-semibold">
                                         {selectedIds.length} {selectedIds.length === 1 ? 'item selecionado' : 'itens selecionados'}
                                     </Badge>
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm" 
-                                        onClick={() => setSelectedIds([])} 
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setSelectedIds([])}
                                         className="h-8"
                                     >
                                         <X className="h-4 w-4 mr-2" />
@@ -580,7 +734,7 @@ export default function ReviewPage() {
                             <div className="text-center space-y-2">
                                 <h3 className="text-2xl font-semibold">Tudo em dia!</h3>
                                 <p className="text-muted-foreground max-w-md">
-                                    Não há alertas pendentes de revisão manual no momento. 
+                                    Não há alertas pendentes de revisão manual no momento.
                                     Todos os itens foram processados com sucesso ou você pode adicionar novos conteúdos manualmente.
                                 </p>
                             </div>
@@ -633,8 +787,8 @@ export default function ReviewPage() {
                                 if (entry.type === 'cluster') {
                                     const groupItems = entry.items;
                                     return (
-                                        <div 
-                                            key={`cluster-${groupItems[0].duplicate_group_id}`} 
+                                        <div
+                                            key={`cluster-${groupItems[0].duplicate_group_id}`}
                                             className="relative animate-in fade-in slide-in-from-bottom-4"
                                             style={{ animationDelay: `${idx * 50}ms` }}
                                         >
@@ -649,8 +803,8 @@ export default function ReviewPage() {
                                     const item = entry.item;
                                     const isSelected = selectedIds.includes(item.id);
                                     return (
-                                        <div 
-                                            key={item.id} 
+                                        <div
+                                            key={item.id}
                                             className="relative group animate-in fade-in slide-in-from-bottom-4"
                                             style={{ animationDelay: `${idx * 50}ms` }}
                                         >
