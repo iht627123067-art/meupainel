@@ -114,33 +114,37 @@ export default function ReviewPage() {
         return filtered;
     }, [reviewItems, searchTerm, minScore, filterSource, filterPeriod, filterHasKeywords, sortBy]);
 
-    const displayList = filteredItems.reduce((acc, item) => {
-        if (item.duplicate_group_id) {
-            // Safer search for existing clusters
-            const existingGroup = acc.find(x =>
-                x.type === 'cluster' &&
-                x.items &&
-                x.items.length > 0 &&
-                x.items[0].duplicate_group_id === item.duplicate_group_id
-            ) as { type: 'cluster', items: any[] } | undefined;
+    const displayList = useMemo(() => {
+        const list = filteredItems.reduce((acc, item) => {
+            if (item.duplicate_group_id) {
+                // Safer search for existing clusters
+                const existingGroup = acc.find(x =>
+                    x.type === 'cluster' &&
+                    x.items &&
+                    x.items.length > 0 &&
+                    x.items[0].duplicate_group_id === item.duplicate_group_id
+                ) as { type: 'cluster', items: any[] } | undefined;
 
-            if (existingGroup) {
-                existingGroup.items.push(item);
+                if (existingGroup) {
+                    existingGroup.items.push(item);
+                } else {
+                    acc.push({ type: 'cluster', items: [item] });
+                }
             } else {
-                acc.push({ type: 'cluster', items: [item] });
+                acc.push({ type: 'single', item });
             }
-        } else {
-            acc.push({ type: 'single', item });
-        }
-        return acc;
-    }, [] as Array<{ type: 'single', item: any } | { type: 'cluster', items: any[] }>);
+            return acc;
+        }, [] as Array<{ type: 'single', item: any } | { type: 'cluster', items: any[] }>);
 
-    // Sort by highest score in group/item
-    displayList.sort((a, b) => {
-        const scoreA = a.type === 'single' ? (a.item.personalization_score || 0) : Math.max(...a.items.map(i => i.personalization_score || 0));
-        const scoreB = b.type === 'single' ? (b.item.personalization_score || 0) : Math.max(...b.items.map(i => i.personalization_score || 0));
-        return scoreB - scoreA;
-    });
+        // Sort by highest score in group/item
+        list.sort((a, b) => {
+            const scoreA = a.type === 'single' ? (a.item.personalization_score || 0) : Math.max(...a.items.map(i => i.personalization_score || 0));
+            const scoreB = b.type === 'single' ? (b.item.personalization_score || 0) : Math.max(...b.items.map(i => i.personalization_score || 0));
+            return scoreB - scoreA;
+        });
+
+        return list;
+    }, [filteredItems]);
 
 
     const toggleSelection = (id: string) => {

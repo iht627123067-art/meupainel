@@ -298,7 +298,12 @@ export function usePipeline(): UsePipelineReturn {
                 setProcessingId(null);
                 // Only refresh the list AFTER the operation is fully complete
                 // This prevents the UI from breaking during processing
-                await fetchItems(true);
+                // Wrap in try-catch to prevent fetch errors from breaking the UI
+                try {
+                    await fetchItems(true);
+                } catch (fetchError) {
+                    console.error("Error refreshing items after retry:", fetchError);
+                }
             }
         },
         [toast, fetchItems, items, autoTranslate]
