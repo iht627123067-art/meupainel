@@ -84,14 +84,17 @@ export async function extractContent(
 
 /**
  * Re-extract content (for manual retry)
+ * Note: We don't change status here to prevent UI flicker.
+ * The extractContent function will update status based on result.
  */
 export async function retryExtraction(
     alertId: string,
     url: string,
     translate: boolean = false
 ): Promise<ExtractionResult> {
-    // Reset status to pending before retry
-    await updateAlertStatus(alertId, "pending");
+    // Don't update status to "pending" here - it causes the item to disappear
+    // from the review list before extraction completes, breaking the UI.
+    // The Edge Function will handle status transitions.
     return extractContent(alertId, url, translate);
 }
 

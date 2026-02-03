@@ -262,7 +262,7 @@ export function usePipeline(): UsePipelineReturn {
         [toast, fetchItems]
     );
 
-    // Retry handler
+    // Retry handler - waits for full completion before updating UI
     const retryItem = useCallback(
         async (id: string, url?: string) => {
             setProcessingId(id);
@@ -273,22 +273,35 @@ export function usePipeline(): UsePipelineReturn {
                     .find((i) => i.id === id);
                 if (!item) throw new Error("Item not found");
 
-                await retryAlert(id, item.status as StageId, url, autoTranslate);
+                // Show toast before starting the operation
                 toast({
-                    title: "Tentando novamente...",
+                    title: "Processando...",
+                    description: "Aguarde enquanto re-extraímos o conteúdo.",
                 });
-                await fetchItems(true);
-            } catch (error: any) {
+
+                // Wait for extraction to complete (success or failure)
+                await retryAlert(id, item.status as StageId, url, autoTranslate);
+
                 toast({
-                    title: "Erro ao tentar novamente",
-                    description: error.message,
+                    title: "Extração concluída!",
+                    description: "O item foi processado e movido para a próxima etapa.",
+                });
+            } catch (error: any) {
+                // Even on error, the item may have been moved to needs_review again
+                // so we still need to refresh
+                toast({
+                    title: "Erro na extração",
+                    description: error.message || "O item permanece na lista para nova tentativa.",
                     variant: "destructive",
                 });
             } finally {
                 setProcessingId(null);
+                // Only refresh the list AFTER the operation is fully complete
+                // This prevents the UI from breaking during processing
+                await fetchItems(true);
             }
         },
-        [toast, fetchItems, items]
+        [toast, fetchItems, items, autoTranslate]
     );
 
     // Save manual content handler
