@@ -8,7 +8,10 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cluster:simulate": "python3 scripts/clustering/simulate_logic.py",
+    "cluster:repair": "deno run --allow-net --allow-env --allow-read scripts/clustering/repair_data.ts",
+    "db:deploy": "npx supabase functions deploy process-gmail --no-verify-jwt && npx supabase functions deploy fetch-rss --no-verify-jwt"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -71,6 +74,8 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "cheerio": "^1.1.2",
+    "deno-bin": "^2.2.7",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -79,7 +84,6 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
-    "vite": "^5.4.19",
-    "cheerio": "^1.1.2"
+    "vite": "^5.4.19"
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AlertsTable } from "@/components/dashboard/AlertsTable";
 import { ImportEmailsModal, AlertDetailPanel, ClusterAlertsCard } from "@/components/alerts";
@@ -7,13 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAlerts } from "@/hooks/useAlerts";
 import { STATUS_FILTERS } from "@/constants";
-import { Search, Filter, RefreshCw, Upload, Mail } from "lucide-react";
+import { Search, Filter, RefreshCw, Upload, Mail, Tag } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { Alert, AlertStatus } from "@/types";
 import { BulkActionsBar } from "@/components/shared/BulkActionsBar";
 import { GenerationProgressModal } from "@/components/shared/GenerationProgressModal";
@@ -22,6 +29,18 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+
+// Topic options for filtering
+const TOPIC_OPTIONS = [
+  { value: 'all', label: 'Todos os Tópicos' },
+  { value: 'ai', label: '🤖 Inteligência Artificial' },
+  { value: 'palantir', label: '📊 Palantir' },
+  { value: 'elections', label: '🗳️ Eleições' },
+  { value: 'trump', label: '🇺🇸 Trump' },
+  { value: 'musk', label: '🚀 Elon Musk' },
+  { value: 'crypto', label: '💰 Crypto' },
+  { value: 'tech', label: '💻 Tecnologia' },
+];
 
 export default function Alerts() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -38,12 +57,14 @@ export default function Alerts() {
     alerts,
     isLoading,
     searchTerm,
+    topicFilter,
     statusFilter,
     selectedAlert,
     isExtracting,
     filteredAlerts,
     statusCounts,
     setSearchTerm,
+    setTopicFilter,
     setSelectedAlert,
     toggleStatusFilter,
     fetchAlerts,
@@ -65,14 +86,28 @@ export default function Alerts() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    fetchAlerts();
+    fetchAlerts(true);
   }, [fetchAlerts]);
+
+  // Debounce search - trigger fetch after user stops typing
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      setSearchTerm(e.target.value);
+      const value = e.target.value;
+      setSearchTerm(value);
+
+      // Clear any existing timeout
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+
+      // Set new timeout to fetch after 500ms of no typing
+      searchTimeoutRef.current = setTimeout(() => {
+        fetchAlerts(true);
+      }, 500);
     },
-    [setSearchTerm]
+    [setSearchTerm, fetchAlerts]
   );
 
   const handleRowClick = useCallback(
@@ -348,6 +383,22 @@ export default function Alerts() {
               className="pl-10"
             />
           </div>
+          <Select value={topicFilter} onValueChange={(value) => {
+            setTopicFilter(value);
+            fetchAlerts(true);
+          }}>
+            <SelectTrigger className="w-56">
+              <Tag className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectValue placeholder="Filtrar por tópico" />
+            </SelectTrigger>
+            <SelectContent>
+              {TOPIC_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon">

@@ -18,6 +18,8 @@ export interface FetchAlertsOptions {
     select?: string;
     page?: number;
     limit?: number;
+    searchTerm?: string;
+    topicFilter?: string;
 }
 
 /**
@@ -26,7 +28,7 @@ export interface FetchAlertsOptions {
 export async function fetchAlerts(
     options: FetchAlertsOptions = {}
 ): Promise<{ data: any[]; count: number | null }> {
-    const { statusFilter, sourceType, select, page = 1, limit = 50 } = options;
+    const { statusFilter, sourceType, select, page = 1, limit = 50, searchTerm, topicFilter } = options;
 
     // Default selection if not specified (optimized for list view)
     const selectQuery = select || "*";
@@ -40,6 +42,32 @@ export async function fetchAlerts(
     // Apply specific source filter if valid
     if (sourceType) {
         query = query.eq("source_type", sourceType);
+    }
+
+    // Apply server-side search term filter (searches title and description)
+    if (searchTerm && searchTerm.trim().length > 0) {
+        const term = searchTerm.trim();
+        query = query.or(`title.ilike.%${term}%,description.ilike.%${term}%,publisher.ilike.%${term}%`);
+    }
+
+    // Apply topic filter (predefined topics)
+    if (topicFilter && topicFilter !== 'all') {
+        // Map topic names to search patterns
+        const topicPatterns: Record<string, string[]> = {
+            'palantir': ['palantir'],
+            'ai': ['artificial intelligence', 'inteligencia artificial', 'AI', 'machine learning'],
+            'elections': ['eleicoes', 'eleições', 'election', 'eleitoral'],
+            'trump': ['trump'],
+            'musk': ['elon', 'musk'],
+            'crypto': ['crypto', 'bitcoin', 'ethereum', 'blockchain'],
+            'tech': ['technology', 'tecnologia', 'startup', 'silicon valley'],
+        };
+
+        const patterns = topicPatterns[topicFilter];
+        if (patterns && patterns.length > 0) {
+            const orClauses = patterns.flatMap(p => [`title.ilike.%${p}%`, `description.ilike.%${p}%`]).join(',');
+            query = query.or(orClauses);
+        }
     }
 
     // Apply limit only if positive, otherwise fetch all (careful with large datasets)

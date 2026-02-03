@@ -67,9 +67,12 @@ def apply_time_decay(score, hours_diff):
         return score * decay
 
 # --- 2. Load Data ---
-file_path = "/Users/thiagobvilar/Documents/meupainel/alerts_sample.json"
+# Use relative path from the script location
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, "data", "sample.json")
+
 if not os.path.exists(file_path):
-    print("Error: alerts_sample.json not found.")
+    print(f"Error: {file_path} not found.")
     exit(1)
 
 with open(file_path, 'r') as f:

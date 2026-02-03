@@ -137,29 +137,59 @@ export async function createManualEntry(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // 1. Create or Update alert (Upsert to handle duplicate URLs)
-    const { data: alert, error: alertError } = await supabase
+    const cleanedUrl = cleanUrl(url);
+
+    // Check if an alert with this URL already exists
+    const { data: existingAlert } = await supabase
         .from("alerts")
-        .upsert({
-            user_id: user.id,
-            title,
-            url,
-            clean_url: url,
-            publisher,
-            email_date: date || new Date().toISOString(),
-            status: 'extracted', // Directly to extracted as we have content
-            is_valid: true,
-            source_type: 'rss', // Valid enum value for manual entries
-            description: content.substring(0, 200) + "..."
-        }, { onConflict: 'clean_url' })
-        .select()
-        .single();
+        .select("id")
+        .eq("clean_url", cleanedUrl)
+        .maybeSingle();
 
-    if (alertError) throw alertError;
-    if (!alert) throw new Error("Erro ao criar alerta");
+    let alertId: string;
 
-    // 2. Save content using existing function
-    await saveManualContent(alert.id, content);
+    if (existingAlert) {
+        // Update existing alert
+        const { error: updateError } = await supabase
+            .from("alerts")
+            .update({
+                title,
+                publisher,
+                email_date: date || new Date().toISOString(),
+                status: 'extracted',
+                is_valid: true,
+                description: content.substring(0, 200) + "..."
+            })
+            .eq("id", existingAlert.id);
+
+        if (updateError) throw updateError;
+        alertId = existingAlert.id;
+    } else {
+        // Create new alert
+        const { data: alert, error: alertError } = await supabase
+            .from("alerts")
+            .insert({
+                user_id: user.id,
+                title,
+                url,
+                clean_url: cleanedUrl,
+                publisher,
+                email_date: date || new Date().toISOString(),
+                status: 'extracted',
+                is_valid: true,
+                source_type: 'rss',
+                description: content.substring(0, 200) + "..."
+            })
+            .select()
+            .single();
+
+        if (alertError) throw alertError;
+        if (!alert) throw new Error("Erro ao criar alerta");
+        alertId = alert.id;
+    }
+
+    // Save content using existing function
+    await saveManualContent(alertId, content);
 }
 
 /**
@@ -172,28 +202,55 @@ export async function createAlertAndExtract(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // 1. Create temporary alert (Upsert to reset/retry if needed)
-    const { data: alert, error: alertError } = await supabase
+    const cleanedUrl = cleanUrl(url);
+
+    // Check if an alert with this URL already exists
+    const { data: existingAlert } = await supabase
         .from("alerts")
-        .upsert({
-            user_id: user.id,
-            title: "Extraindo...",
-            url,
-            clean_url: url,
-            status: 'pending',
-            is_valid: true,
-            source_type: 'rss'
-        }, { onConflict: 'clean_url' })
-        .select()
-        .single();
+        .select("id")
+        .eq("clean_url", cleanedUrl)
+        .maybeSingle();
 
-    if (alertError) throw alertError;
-    if (!alert) throw new Error("Erro ao criar alerta");
+    let alertId: string;
 
-    // 2. Call extraction with a longer UI timeout
+    if (existingAlert) {
+        // Update existing alert to retry
+        const { error: updateError } = await supabase
+            .from("alerts")
+            .update({
+                title: "Extraindo...",
+                status: 'pending',
+                is_valid: true
+            })
+            .eq("id", existingAlert.id);
+
+        if (updateError) throw updateError;
+        alertId = existingAlert.id;
+    } else {
+        // Create new alert
+        const { data: alert, error: alertError } = await supabase
+            .from("alerts")
+            .insert({
+                user_id: user.id,
+                title: "Extraindo...",
+                url,
+                clean_url: cleanedUrl,
+                status: 'pending',
+                is_valid: true,
+                source_type: 'rss'
+            })
+            .select()
+            .single();
+
+        if (alertError) throw alertError;
+        if (!alert) throw new Error("Erro ao criar alerta");
+        alertId = alert.id;
+    }
+
+    // Call extraction with a longer UI timeout
     try {
         await withTimeout(
-            extractContent(alert.id, url, translate),
+            extractContent(alertId, url, translate),
             100000, // 100s UI timeout for the whole chain
             "A extração está demorando mais que o esperado, mas continuará em segundo plano."
         );
@@ -204,7 +261,7 @@ export async function createAlertAndExtract(
         await supabase.from("alerts").update({
             title: "Problema na Extração (Ajuste Manual)",
             status: "needs_review"
-        }).eq("id", alert.id);
+        }).eq("id", alertId);
 
         throw error;
     }

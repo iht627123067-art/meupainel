@@ -14,6 +14,7 @@ export interface UseAlertsReturn {
     alerts: Alert[];
     isLoading: boolean;
     searchTerm: string;
+    topicFilter: string;
     statusFilter: AlertStatus[];
     selectedAlert: Alert | null;
     isExtracting: boolean;
@@ -24,6 +25,7 @@ export interface UseAlertsReturn {
 
     // Actions
     setSearchTerm: (term: string) => void;
+    setTopicFilter: (topic: string) => void;
     setSelectedAlert: (alert: Alert | null) => void;
     toggleStatusFilter: (status: AlertStatus) => void;
     fetchAlerts: (refresh?: boolean) => Promise<void>;
@@ -40,7 +42,8 @@ export interface UseAlertsReturn {
 export function useAlerts(): UseAlertsReturn {
     const [alerts, setAlerts] = useState<Alert[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [searchTerm, setSearchTerm] = useState("");
+    const [searchTerm, setSearchTermState] = useState("");
+    const [topicFilter, setTopicFilterState] = useState("all");
     const [statusFilter, setStatusFilter] = useState<AlertStatus[]>([]);
     const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
     const [isExtracting, setIsExtracting] = useState(false);
@@ -62,6 +65,8 @@ export function useAlerts(): UseAlertsReturn {
                 sourceType: "gmail_alert",
                 page: currentPage,
                 limit: ITEMS_PER_PAGE,
+                searchTerm,
+                topicFilter,
                 // Select only necessary fields for the list view to save bandwidth
                 select: "id, title, description, publisher, status, created_at, url, clean_url, is_valid, duplicate_group_id, personalization_score, email_date"
             });
@@ -86,7 +91,7 @@ export function useAlerts(): UseAlertsReturn {
         } finally {
             setIsLoading(false);
         }
-    }, [toast, page]);
+    }, [toast, page, searchTerm, topicFilter]);
 
     const loadMore = useCallback(async () => {
         if (!hasMore || isLoading) return;
@@ -264,6 +269,7 @@ export function useAlerts(): UseAlertsReturn {
         alerts,
         isLoading,
         searchTerm,
+        topicFilter,
         statusFilter,
         selectedAlert,
         isExtracting,
@@ -273,7 +279,8 @@ export function useAlerts(): UseAlertsReturn {
         hasMore,
 
         // Actions
-        setSearchTerm,
+        setSearchTerm: setSearchTermState,
+        setTopicFilter: setTopicFilterState,
         setSelectedAlert: selectAlert,
         toggleStatusFilter,
         fetchAlerts,
